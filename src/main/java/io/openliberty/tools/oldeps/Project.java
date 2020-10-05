@@ -1,4 +1,5 @@
-package io.openliberty.tools.oldeps;/*
+
+/*
  * =============================================================================
  * Copyright (c) 2020 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
@@ -10,6 +11,7 @@ package io.openliberty.tools.oldeps;/*
  *     IBM Corporation - initial API and implementation
  * =============================================================================
  */
+package io.openliberty.tools.oldeps;
 
 import java.io.BufferedReader;
 import java.io.IOError;
@@ -17,18 +19,29 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Stream;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableList;
+import static java.util.stream.Collectors.toList;
 
 public class Project {
     static final Path PROJECT_ROOT = Paths.get(System.getProperty("project.root", "/Users/chackoj/git/liberty/open-liberty/dev"));
     static final Map<String, Project> preCanon = new HashMap<>();
     static final Map<String, Project> canon = new HashMap<>();
     private final String name;
-    private List<Project> preDependencies = new ArrayList<>();
-    private final List<Project> dependencies = unmodifiableList(preDependencies);
+    private final Path bndPath;
+    private final boolean isRealProject;
+    private final List<String> declaredDeps = new ArrayList<>();
+    private List<Project> dependencies;
+    private final List<String> buildPath;
 
     public static void main(String[] args) throws IOException {
         Stream.of(args)
@@ -51,31 +64,39 @@ public class Project {
 
     Project(String name) {
         this.name = name;
+        this.bndPath = PROJECT_ROOT.resolve(name).resolve("bnd.bnd");
+        this.isRealProject = Files.exists(bndPath);
+        if (isRealProject) {
+            this.buildPath = getBuildPath(bndPath);
+        } else {
+            this.buildPath = null;
+            this.dependencies = emptyList();
+        }
     }
 
     private Project cook() {
-        if (preDependencies == null) return this;
-        try {
-            final Path bndPath = PROJECT_ROOT.resolve(name).resolve("bnd.bnd");
-            if (Files.exists(bndPath)) {
-                final BufferedReader bndRdr;
-                bndRdr = Files.newBufferedReader(bndPath);
-                final Properties bndProps = new Properties();
-                bndProps.load(bndRdr);
-                final String buildPath = bndProps.getProperty("-buildpath");
-                Stream.of(buildPath.split(",\\s*"))
-                        .map(s -> s.replaceFirst(";.*", ""))
-                        .map(s -> getRaw(s))
-                        .forEach(preDependencies::add);
-                dependencies.forEach(Project::cook);
-            }
-            return this;
+        if (null != dependencies) return this;
+        dependencies = new ArrayList<>();
+        buildPath.stream()
+                .map(s -> s.replaceFirst(";.*", ""))
+                .map(s -> getRaw(s))
+                .filter(p -> p.isRealProject)
+                .map(Project::cook)
+                .forEach(dependencies::add);
+        return this;
+    }
+
+    private static List<String> getBuildPath(Path bndPath) {
+        final Properties bndProps = new Properties();
+        try (BufferedReader bndRdr = Files.newBufferedReader(bndPath)) {
+            bndProps.load(bndRdr);
         } catch (IOException e) {
             throw new IOError(e);
-        } finally {
-            // burn the bridge that allows new  dependencies to be added
-            preDependencies = null;
         }
+        final String prop = bndProps.getProperty("-buildpath", "");
+        return unmodifiableList(Stream.of(prop.split(",\\s*"))
+                .map(s -> s.replaceFirst(";.*", ""))
+                .collect(toList()));
     }
 
     private static Project getCanonical(String name) {
