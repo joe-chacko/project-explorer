@@ -11,7 +11,7 @@
  *     IBM Corporation - initial API and implementation
  * =============================================================================
  */
-package io.openliberty.tools.oldeps;
+package io.openliberty.tools.bnddeps;
 
 import java.io.BufferedReader;
 import java.io.IOError;
