@@ -40,8 +40,10 @@ public class Project {
     private final Path bndPath;
     private final boolean isRealProject;
     private final List<String> declaredDeps = new ArrayList<>();
+    private final List<String> testPath;
     private List<Project> dependencies;
     private final List<String> buildPath;
+    private final Properties bndProps;
 
     public static void main(String[] args) throws IOException {
         Stream.of(args)
@@ -67,9 +69,18 @@ public class Project {
         this.bndPath = PROJECT_ROOT.resolve(name).resolve("bnd.bnd");
         this.isRealProject = Files.exists(bndPath);
         if (isRealProject) {
-            this.buildPath = getBuildPath(bndPath);
+            this.bndProps = new Properties();
+            try (BufferedReader bndRdr = Files.newBufferedReader(bndPath)) {
+                bndProps.load(bndRdr);
+            } catch (IOException e) {
+                throw new IOError(e);
+            }
+            this.buildPath = getPathProp("-buildpath");
+            this.testPath = getPathProp("-testpath");
         } else {
+            this.bndProps = null;
             this.buildPath = null;
+            this.testPath = null;
             this.dependencies = emptyList();
         }
     }
@@ -77,23 +88,22 @@ public class Project {
     private Project cook() {
         if (null != dependencies) return this;
         dependencies = new ArrayList<>();
-        buildPath.stream()
+        addDeps(this.buildPath);
+        addDeps(this.testPath);
+        return this;
+    }
+
+    private void addDeps(List<String> path) {
+        path.stream()
                 .map(s -> s.replaceFirst(";.*", ""))
                 .map(s -> getRaw(s))
                 .filter(p -> p.isRealProject)
                 .map(Project::cook)
                 .forEach(dependencies::add);
-        return this;
     }
 
-    private static List<String> getBuildPath(Path bndPath) {
-        final Properties bndProps = new Properties();
-        try (BufferedReader bndRdr = Files.newBufferedReader(bndPath)) {
-            bndProps.load(bndRdr);
-        } catch (IOException e) {
-            throw new IOError(e);
-        }
-        final String prop = bndProps.getProperty("-buildpath", "");
+    private List<String> getPathProp(String key) {
+        final String prop = bndProps.getProperty(key, "");
         return unmodifiableList(Stream.of(prop.split(",\\s*"))
                 .map(s -> s.replaceFirst(";.*", ""))
                 .collect(toList()));
