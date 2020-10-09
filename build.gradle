@@ -1,5 +1,14 @@
 plugins {
     id 'java'
+    id "application"
+}
+
+ext {
+   javaMainClass = "io.openliberty.tools.bnddeps.Project"
+}
+
+application {
+    mainClassName = javaMainClass
 }
 
 group 'io.openliberty.tools'
