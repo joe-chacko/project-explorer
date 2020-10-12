@@ -33,7 +33,7 @@ import static java.util.Collections.unmodifiableList;
 import static java.util.stream.Collectors.toList;
 
 public class Project {
-    static final Path PROJECT_ROOT = Paths.get(System.getProperty("project.root", "/Users/chackoj/git/liberty/open-liberty/dev"));
+    static final Path PROJECT_ROOT = Paths.get(System.getProperty("project.root", System.getProperty("user.home") + "/git/liberty/open-liberty/dev"));
     static final Map<String, Project> preCanon = new HashMap<>();
     static final Map<String, Project> canon = new HashMap<>();
     private final String name;
