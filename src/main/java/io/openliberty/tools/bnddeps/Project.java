@@ -24,14 +24,13 @@ import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableList;
-import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 
 public class Project {
     static final Path PROJECT_ROOT = Paths.get(System.getProperty("project.root", System.getProperty("user.home") + "/git/liberty/open-liberty/dev"));
-    static final Path WORKSPACE_ROOT = System.getProperties().containsKey("workspace.root")
-            ? Paths.get(System.getProperty("workspace.root"))
+    static final Path WORKSPACE_ROOT = System.getProperties().containsKey("eclipse.workspace")
+            ? Paths.get(System.getProperty("eclipse.workspace"))
             : PROJECT_ROOT.getParent().getParent().resolve("eclipse");
     static final Path PROJECT_METADATA_PATH = WORKSPACE_ROOT.resolve(".metadata/.plugins/org.eclipse.core.resources/.projects");
     static final Set<String> KNOWN_PROJECTS;
