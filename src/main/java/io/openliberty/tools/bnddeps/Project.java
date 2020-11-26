@@ -19,49 +19,60 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableList;
+import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toUnmodifiableSet;
 
 public class Project {
     static final Path PROJECT_ROOT = Paths.get(System.getProperty("project.root", System.getProperty("user.home") + "/git/liberty/open-liberty/dev"));
+    static final Path WORKSPACE_ROOT = System.getProperties().containsKey("workspace.root")
+            ? Paths.get(System.getProperty("workspace.root"))
+            : PROJECT_ROOT.getParent().getParent().resolve("eclipse");
+    static final Path PROJECT_METADATA_PATH = WORKSPACE_ROOT.resolve(".metadata/.plugins/org.eclipse.core.resources/.projects");
+    static final Set<String> KNOWN_PROJECTS;
     static final Map<String, Project> preCanon = new HashMap<>();
     static final Map<String, Project> canon = new HashMap<>();
     private final String name;
     private final Path bndPath;
     private final boolean isRealProject;
-    private final List<String> declaredDeps = new ArrayList<>();
     private final List<String> testPath;
     private List<Project> dependencies;
     private final List<String> buildPath;
     private final Properties bndProps;
 
-    public static void main(String[] args) throws IOException {
+    static {
+        try {
+             KNOWN_PROJECTS = Files.list(PROJECT_METADATA_PATH)
+                    .filter(Files::isDirectory)
+                    .map(Path::getFileName)
+                    .map(Path::toString)
+                    .collect(toUnmodifiableSet());
+        } catch (IOException e) {
+            throw new IOError(e);
+        }
+    }
+
+    public static void main(String[] args) {
         Stream.of(args)
                 .map(Project::getCanonical)
                 .forEach(Project::printInTopologicalOrder);
     }
 
-    private void printInTopologicalOrder() {
-        Set<Project> list = new LinkedHashSet<>();
-        insertInto(list);
-        list.stream()
-                .map(p -> p.name)
-                .forEach(System.out::println);
+    private static Project getCanonical(String name) {
+        return canon.computeIfAbsent(name, Project::getCooked);
     }
 
-    private void insertInto(Set<Project> list) {
-        dependencies.forEach(child -> child.insertInto(list));
-        list.add(this);
+    private static Project getCooked(String name) {
+        return getRaw(name).cook();
+    }
+
+    private static Project getRaw(String name) {
+        return preCanon.computeIfAbsent(name, Project::new);
     }
 
     Project(String name) {
@@ -109,15 +120,25 @@ public class Project {
                 .collect(toList()));
     }
 
-    private static Project getCanonical(String name) {
-        return canon.computeIfAbsent(name, Project::getCooked);
+    private void printInTopologicalOrder() {
+        dfs()
+                .map(Project::displayName)
+                .forEach(System.out::println);
     }
 
-    private static Project getCooked(String name) {
-        return getRaw(name).cook();
+    // depth first search on current Project
+    private Stream<Project> dfs() {
+        // find children in order of first occurrence in a DFS
+        return dfs0(new LinkedHashSet<Project>()).stream();
     }
 
-    private static Project getRaw(String name) {
-        return preCanon.computeIfAbsent(name, Project::new);
+    private Set<Project> dfs0(Set<Project> list) {
+        dependencies.forEach(child -> child.dfs0(list));
+        list.add(this);
+        return list;
     }
+
+    private String displayName() { return String.format(getDisplayFormat(), name); }
+
+    private String getDisplayFormat() { return KNOWN_PROJECTS.contains(name) ? "[%s]" : " %s"; }
 }
