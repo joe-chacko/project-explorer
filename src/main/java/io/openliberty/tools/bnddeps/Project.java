@@ -22,10 +22,9 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Stream;
 
-import static java.util.Collections.emptyList;
-import static java.util.Collections.unmodifiableList;
+import static java.util.Collections.*;
 import static java.util.stream.Collectors.toList;
-import static java.util.stream.Collectors.toUnmodifiableSet;
+import static java.util.stream.Collectors.toSet;
 
 public class Project {
     public static final String BND_WORKSPACE_PROP_NAME = "bnd.workspace";
@@ -60,11 +59,11 @@ public class Project {
             return Collections.emptySet();
         }
         try {
-            return Files.list(dotProjectsDir)
+            return unmodifiableSet(Files.list(dotProjectsDir)
                     .filter(Files::isDirectory)
                     .map(Path::getFileName)
                     .map(Path::toString)
-                    .collect(toUnmodifiableSet());
+                    .collect(toSet()));
         } catch (IOException e) {
             error("Could not enumerate Eclipse projects despite finding metadata location: " + dotProjectsDir,
                     "Exception was " + e);
