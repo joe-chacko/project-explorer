@@ -28,14 +28,14 @@ import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 
 public class Project {
-    static final Path PROJECT_ROOT = Paths.get(System.getProperty("project.root", System.getProperty("user.home") + "/git/liberty/open-liberty/dev"));
-    static final Path WORKSPACE_ROOT = System.getProperties().containsKey("eclipse.workspace")
-            ? Paths.get(System.getProperty("eclipse.workspace"))
-            : PROJECT_ROOT.getParent().getParent().resolve("eclipse");
-    static final Path PROJECT_METADATA_PATH = WORKSPACE_ROOT.resolve(".metadata/.plugins/org.eclipse.core.resources/.projects");
-    static final Set<String> KNOWN_PROJECTS;
+    public static final String BND_WORKSPACE_PROP_NAME = "bnd.workspace";
+    public static final String ECLIPSE_WORKSPACE_PROP_NAME = "eclipse.workspace";
+    public static final String ECLIPSE_CORE_RESOURCES_PROJECTS = ".metadata/.plugins/org.eclipse.core.resources/.projects";
+    static final Path BND_WORKSPACE = Paths.get(System.getProperty(BND_WORKSPACE_PROP_NAME, "Set the bnd.workspace system property in build.gradle's run task."));
+    static final Set<String> ECLIPSE_PROJECTS = getKnownEclipseProjects();
     static final Map<String, Project> preCanon = new HashMap<>();
     static final Map<String, Project> canon = new HashMap<>();
+    static boolean errorHappened;
     private final String name;
     private final Path bndPath;
     private final boolean isRealProject;
@@ -44,22 +44,52 @@ public class Project {
     private final List<String> buildPath;
     private final Properties bndProps;
 
-    static {
+    static Set<String> getKnownEclipseProjects() {
+        final String prop = System.getProperty(ECLIPSE_WORKSPACE_PROP_NAME);
+        if (prop == null) return Collections.emptySet();
+        final Path eclipseWorkspace = Paths.get(prop);
+        if (!!!Files.isDirectory(eclipseWorkspace)) {
+            error("Could not locate eclipse workspace: " + eclipseWorkspace,
+                    "To remove this error message, do not set the eclipse.workspace property");
+            return Collections.emptySet();
+        }
+        final Path dotProjectsDir = eclipseWorkspace.resolve(ECLIPSE_CORE_RESOURCES_PROJECTS);
+        if (!!!Files.isDirectory(dotProjectsDir)) {
+            error("Could not locate .projects dir: " + dotProjectsDir,
+                    "Please fix this tool's broken logic and submit a GitHub pull request");
+            return Collections.emptySet();
+        }
         try {
-             KNOWN_PROJECTS = Files.list(PROJECT_METADATA_PATH)
+            return Files.list(dotProjectsDir)
                     .filter(Files::isDirectory)
                     .map(Path::getFileName)
                     .map(Path::toString)
                     .collect(toUnmodifiableSet());
         } catch (IOException e) {
-            throw new IOError(e);
+            error("Could not enumerate Eclipse projects despite finding metadata location: " + dotProjectsDir,
+                    "Exception was " + e);
+            e.printStackTrace();
+            return Collections.emptySet();
         }
     }
 
+    private static void error(String message, String...details) {
+        errorHappened = true;
+        System.err.println("ERROR: " + message);
+        for (String detail: details) System.err.println(detail);
+    }
+
     public static void main(String[] args) {
-        Stream.of(args)
-                .map(Project::getCanonical)
-                .forEach(Project::printInTopologicalOrder);
+        try {
+            System.out.println("================================================================================");
+            if (!!!Files.isDirectory(BND_WORKSPACE)) error("Could not locate bnd workspace: " + BND_WORKSPACE);
+            else Stream.of(args)
+                    .map(Project::getCanonical)
+                    .forEach(Project::printInTopologicalOrder);
+        } finally {
+            System.out.println("================================================================================");
+        }
+        System.exit(errorHappened ? -1 : 0);
     }
 
     private static Project getCanonical(String name) {
@@ -76,7 +106,7 @@ public class Project {
 
     Project(String name) {
         this.name = name;
-        this.bndPath = PROJECT_ROOT.resolve(name).resolve("bnd.bnd");
+        this.bndPath = BND_WORKSPACE.resolve(name).resolve("bnd.bnd");
         this.isRealProject = Files.exists(bndPath);
         if (isRealProject) {
             this.bndProps = new Properties();
@@ -139,5 +169,5 @@ public class Project {
 
     private String displayName() { return String.format(getDisplayFormat(), name); }
 
-    private String getDisplayFormat() { return KNOWN_PROJECTS.contains(name) ? "[%s]" : " %s"; }
+    private String getDisplayFormat() { return ECLIPSE_PROJECTS.contains(name) ? "[%s]" : " %s"; }
 }

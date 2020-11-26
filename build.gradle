@@ -15,6 +15,11 @@ application {
     mainClassName = javaMainClass
 }
 
+run {
+    systemProperties["bnd.workspace"] = "../open-liberty/dev"
+    systemProperties["eclipse.workspace"] = "../eclipse"
+}
+
 group 'io.openliberty.tools'
 version '1.0-SNAPSHOT'
 
