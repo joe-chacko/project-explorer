@@ -36,6 +36,7 @@ public class Project {
     static final Map<String, Project> canon = new HashMap<>();
     static boolean errorHappened;
     private final String name;
+    private final Path root;
     private final Path bndPath;
     private final boolean isRealProject;
     private final List<String> testPath;
@@ -105,7 +106,8 @@ public class Project {
 
     Project(String name) {
         this.name = name;
-        this.bndPath = BND_WORKSPACE.resolve(name).resolve("bnd.bnd");
+        this.root = BND_WORKSPACE.resolve(name);
+        this.bndPath = root.resolve("bnd.bnd");
         this.isRealProject = Files.exists(bndPath);
         if (isRealProject) {
             this.bndProps = new Properties();
@@ -166,7 +168,17 @@ public class Project {
         return list;
     }
 
-    private String displayName() { return String.format(getDisplayFormat(), name); }
+    private String displayName() {
+        return (ECLIPSE_PROJECTS.contains(name))
+                ? String.format("[%s]", name)
+                : String.format(" %s \t->\t%s", name, getRoot());
+    }
 
-    private String getDisplayFormat() { return ECLIPSE_PROJECTS.contains(name) ? "[%s]" : " %s"; }
+    private Path getRoot() {
+        try {
+            return root.toRealPath();
+        } catch (IOException e) {
+            return root;
+        }
+    }
 }
