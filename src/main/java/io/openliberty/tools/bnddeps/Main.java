@@ -46,7 +46,7 @@ public class Main {
     private static CommandLine parse(String...args) {
         try {
             final CommandLine cmdLine = new DefaultParser().parse(OPTIONS, args);
-            if (cmdLine.hasOption("h")) {
+            if (cmdLine.hasOption("h") || cmdLine.getArgList().isEmpty()) {
                 printHelp();
                 System.exit(0);
             }

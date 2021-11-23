@@ -1,12 +1,7 @@
 This tool assists in understanding the relationships between bnd projects in a bnd workspace.
 
-To build the tool, issue the following command:\
-`./gradlew installDist`\
+To use it, invoke the `bnddeps` script in the same directory as this README.
 
-This will create an installable directory structure under `build/install`.
+Invoke it without args for syntax help.
 
-Either install this somewhere, or put the executable script under the directory into your path.
-
-For example, I would use `ln -s $PWD/build/install/bnddeps/bin/bnddeps ~/bin`.
-
-Note that the script cannot be moved or copied on its own, as it needs the rest of the directory structure to find the Java classes.
+Invoke it with a list of project names to see the dependencies of those projects.
