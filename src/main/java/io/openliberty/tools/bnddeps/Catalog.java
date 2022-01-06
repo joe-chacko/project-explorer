@@ -37,6 +37,7 @@ class Catalog {
     final Map<String, Project> canon = new HashMap<>();
     final Path bndWorkspace;
     final Set<String> knownProjects;
+    boolean showAll;
 
     Catalog(Path bndWorkspace, Set<String> knownProjects) throws IOException {
         this.bndWorkspace = bndWorkspace;
@@ -65,6 +66,10 @@ class Catalog {
 
     private Project getRaw(String name) {
         return preCanon.computeIfAbsent(name, Project::new);
+    }
+
+    void showAllProjects(boolean showAll) {
+        this.showAll = showAll;
     }
 
     class Project {
@@ -136,6 +141,7 @@ class Catalog {
         void printInTopologicalOrder() {
             if (!isRealProject) throw new IllegalStateException("Project directory does not exist: " + root.toString());
             dfs()
+                    .filter(Project::isVisible)
                     .map(Project::displayName)
                     .forEach(System.out::println);
         }
@@ -152,10 +158,14 @@ class Catalog {
             return list;
         }
 
+        boolean isUnknown() { return !knownProjects.contains(name); }
+
+        boolean isVisible() { return showAll || isUnknown(); }
+
         private String displayName() {
-            return (knownProjects.contains(name))
-                    ? String.format("[%s]", name)
-                    : String.format(" %s \t->\t%s", name, getRoot());
+            return isUnknown() ?
+                    String.format("  %s \t->\t%s", name, getRoot()) :
+                    String.format(" [%s]", name);
         }
 
         private Path getRoot() {

@@ -32,6 +32,7 @@ import static java.util.stream.Collectors.toSet;
 
 public class Main {
     private static final Options OPTIONS = new Options()
+            .addOption("a", "all", false, "show projects already in the eclipse workspace")
             .addOption("h", "help", false, "print a help message")
             .addOption("b", "bnd-workspace", true, "specify location of the bnd workspace (default=.)")
             .addOption("e", "eclipse-workspace", true, "specify location of the eclipse workspace (default=../../eclipse");
@@ -69,6 +70,7 @@ public class Main {
             if (!!!Files.isDirectory(bndWorkspace)) error("Could not locate bnd workspace: " + bndWorkspace);
             else {
                 final Catalog catalog = new Catalog(bndWorkspace, getKnownEclipseProjects(eclipseWorkspace));
+                catalog.showAllProjects(cmdLine.hasOption('a'));
                 cmdLine.getArgList().stream()
                         .map(catalog::getCanonical)
                         .forEach(Project::printInTopologicalOrder);
