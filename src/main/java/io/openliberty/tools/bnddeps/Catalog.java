@@ -22,8 +22,10 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
@@ -36,9 +38,21 @@ class Catalog {
     final Path bndWorkspace;
     final Set<String> knownProjects;
 
-    Catalog(Path bndWorkspace, Set<String> knownProjects) {
+    Catalog(Path bndWorkspace, Set<String> knownProjects) throws IOException {
         this.bndWorkspace = bndWorkspace;
         this.knownProjects = knownProjects;
+        // Initialise projects for every subdirectory that has a bnd file
+        Files.list(bndWorkspace)
+                .filter(Files::isDirectory)
+                .filter(p -> Files.exists(p.resolve("bnd.bnd")))
+                .map(Path::getFileName)
+                .map(Path::toString)
+                .map(Project::new)
+                // store the project against the folder name
+                .peek(project -> preCanon.put(project.name, project))
+                .filter(Project::symbolicNameDiffersFromName)
+                // store the project against the symbolic name, if different
+                .forEach(project -> preCanon.put(project.bundleSymbolicName, project));
     }
 
     Project getCanonical(String name) {
@@ -57,8 +71,10 @@ class Catalog {
         private final String name;
         private final Path root;
         private final Path bndPath;
+        private final Path bndOverridesPath;
         private final boolean isRealProject;
         private final List<String> testPath;
+        private final String bundleSymbolicName;
         private List<Project> dependencies;
         private final List<String> buildPath;
         private final Properties bndProps;
@@ -67,18 +83,26 @@ class Catalog {
             this.name = name;
             this.root = bndWorkspace.resolve(name);
             this.bndPath = root.resolve("bnd.bnd");
+            this.bndOverridesPath = root.resolve("bnd.overrides");
             this.isRealProject = Files.exists(bndPath);
             if (isRealProject) {
                 this.bndProps = new Properties();
                 try (BufferedReader bndRdr = Files.newBufferedReader(bndPath)) {
                     bndProps.load(bndRdr);
+                    if (Files.exists(bndOverridesPath)) {
+                        try (BufferedReader overrideRdr = Files.newBufferedReader(bndOverridesPath)) {
+                            bndProps.load(overrideRdr);
+                        }
+                    }
                 } catch (IOException e) {
                     throw new IOError(e);
                 }
+                this.bundleSymbolicName = bndProps.getProperty("Bundle-SymbolicName");
                 this.buildPath = getPathProp("-buildpath");
                 this.testPath = getPathProp("-testpath");
             } else {
                 this.bndProps = null;
+                this.bundleSymbolicName = name;
                 this.buildPath = null;
                 this.testPath = null;
                 this.dependencies = emptyList();
@@ -141,5 +165,14 @@ class Catalog {
                 return root;
             }
         }
+
+        boolean symbolicNameDiffersFromName() {
+            return Optional.ofNullable(bundleSymbolicName)
+                    .filter(not(String::isEmpty))
+                    .filter(not(name::equals))
+                    .isPresent();
+        }
     }
+
+    private static <T> Predicate<T> not(Predicate<T> predicate) { return t -> !!!predicate.test(t); }
 }

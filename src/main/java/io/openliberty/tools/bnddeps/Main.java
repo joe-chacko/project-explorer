@@ -24,9 +24,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.Set;
 
+import static java.util.Collections.emptySet;
 import static java.util.Collections.unmodifiableSet;
 import static java.util.stream.Collectors.toSet;
 
@@ -68,20 +68,14 @@ public class Main {
             System.out.println("================================================================================");
             if (!!!Files.isDirectory(bndWorkspace)) error("Could not locate bnd workspace: " + bndWorkspace);
             else {
-                final Set<String> knownProjects;
-                if (!!!Files.isDirectory(eclipseWorkspace)) {
-                    if (cmdLine.hasOption("e")) error( "Could not locate eclipse workspace: " + eclipseWorkspace);
-                    knownProjects = Collections.emptySet();
-                } else {
-                    knownProjects = getKnownEclipseProjects(eclipseWorkspace);
-                }
-
-                final Catalog catalog = new Catalog(bndWorkspace, knownProjects);
-
+                final Catalog catalog = new Catalog(bndWorkspace, getKnownEclipseProjects(eclipseWorkspace));
                 cmdLine.getArgList().stream()
                         .map(catalog::getCanonical)
                         .forEach(Project::printInTopologicalOrder);
             }
+        } catch (IOException e) {
+            error(e.getMessage());
+            e.printStackTrace();
         } finally {
             System.out.println("================================================================================");
         }
@@ -93,13 +87,13 @@ public class Main {
         if (!!!Files.isDirectory(eclipseWorkspace)) {
             error("Could not locate eclipse workspace: " + eclipseWorkspace,
                     "To remove this error message, do not set the eclipse.workspace property");
-            return Collections.emptySet();
+            return emptySet();
         }
         final Path dotProjectsDir = eclipseWorkspace.resolve(ECLIPSE_CORE_RESOURCES_PROJECTS);
         if (!!!Files.isDirectory(dotProjectsDir)) {
             error("Could not locate .projects dir: " + dotProjectsDir,
                     "Please fix this tool's broken logic and submit a GitHub pull request");
-            return Collections.emptySet();
+            return emptySet();
         }
         try {
             return unmodifiableSet(Files.list(dotProjectsDir)
@@ -111,7 +105,7 @@ public class Main {
             error("Could not enumerate Eclipse projects despite finding metadata location: " + dotProjectsDir,
                     "Exception was " + e);
             e.printStackTrace();
-            return Collections.emptySet();
+            return emptySet();
         }
     }
 
