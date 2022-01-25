@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
@@ -65,7 +66,13 @@ class Catalog {
     }
 
     private Project getRaw(String name) {
-        return preCanon.computeIfAbsent(name, Project::new);
+        try {
+            return preCanon.computeIfAbsent(name, Project::new);
+        } catch (Exception e) {
+            // could not construct project, mention this and continue
+            System.err.printf("Could not explore project with name %s: %s", name, e);
+            return null;
+        }
     }
 
     void showAllProjects(boolean showAll) {
@@ -126,6 +133,7 @@ class Catalog {
             path.stream()
                     .map(s -> s.replaceFirst(";.*", ""))
                     .map(s -> getRaw(s))
+                    .filter(Objects::nonNull)
                     .filter(p -> p.isRealProject)
                     .map(Project::cook)
                     .forEach(dependencies::add);
