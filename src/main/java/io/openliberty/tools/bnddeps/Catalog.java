@@ -16,6 +16,7 @@ import java.io.BufferedReader;
 import java.io.IOError;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -66,20 +67,14 @@ class Catalog {
     }
 
     private Project getRaw(String name) {
-        try {
-            return preCanon.computeIfAbsent(name, Project::new);
-        } catch (Exception e) {
-            // could not construct project, mention this and continue
-            System.err.printf("Could not explore project with name %s: %s", name, e);
-            return null;
-        }
+        return preCanon.computeIfAbsent(name, Project::new);
     }
 
     void showAllProjects(boolean showAll) {
         this.showAll = showAll;
     }
 
-    class Project {
+    final class Project {
         private final String name;
         private final Path root;
         private final Path bndPath;
@@ -93,32 +88,48 @@ class Catalog {
 
         Project(String name) {
             this.name = name;
-            this.root = bndWorkspace.resolve(name);
-            this.bndPath = root.resolve("bnd.bnd");
-            this.bndOverridesPath = root.resolve("bnd.overrides");
-            this.isRealProject = Files.exists(bndPath);
-            if (isRealProject) {
-                this.bndProps = new Properties();
-                try (BufferedReader bndRdr = Files.newBufferedReader(bndPath)) {
-                    bndProps.load(bndRdr);
-                    if (Files.exists(bndOverridesPath)) {
-                        try (BufferedReader overrideRdr = Files.newBufferedReader(bndOverridesPath)) {
-                            bndProps.load(overrideRdr);
-                        }
-                    }
-                } catch (IOException e) {
-                    throw new IOError(e);
-                }
-                this.bundleSymbolicName = bndProps.getProperty("Bundle-SymbolicName");
-                this.buildPath = getPathProp("-buildpath");
-                this.testPath = getPathProp("-testpath");
-            } else {
+            final Optional<Path> resolvedRoot = resolveRoot();
+            Optional<Path> resolvedBnd = resolvedRoot.map(p -> p.resolve("bnd.bnd"));
+            this.root = resolvedRoot.orElse(null);
+            this.bndPath = resolvedBnd.orElse(null);
+            this.bndOverridesPath = resolvedRoot.map(p -> p.resolve("bnd.overrides")).orElse(null);
+            this.isRealProject = resolvedBnd.map(Files::exists).orElse(false);
+            if (!isRealProject) {
                 this.bndProps = null;
                 this.bundleSymbolicName = name;
                 this.buildPath = null;
                 this.testPath = null;
                 this.dependencies = emptyList();
+                return;
             }
+            this.bndProps = getBndProps();
+            this.bundleSymbolicName = bndProps.getProperty("Bundle-SymbolicName");
+            this.buildPath = getPathProp("-buildpath");
+            this.testPath = getPathProp("-testpath");
+            // this.dependencies will be initialized on demand
+        }
+
+        private Optional<Path> resolveRoot() {
+            try {
+                return Optional.of(bndWorkspace.resolve(name));
+            } catch (InvalidPathException e) {
+                return Optional.empty();
+            }
+        }
+
+        private Properties getBndProps() {
+            Properties bndProps = new Properties();
+            try (BufferedReader bndRdr = Files.newBufferedReader(bndPath)) {
+                bndProps.load(bndRdr);
+                if (Files.exists(bndOverridesPath)) {
+                    try (BufferedReader overrideRdr = Files.newBufferedReader(bndOverridesPath)) {
+                        bndProps.load(overrideRdr);
+                    }
+                }
+            } catch (IOException e) {
+                throw new IOError(e);
+            }
+            return bndProps;
         }
 
         private Project cook() {
@@ -133,7 +144,6 @@ class Catalog {
             path.stream()
                     .map(s -> s.replaceFirst(";.*", ""))
                     .map(s -> getRaw(s))
-                    .filter(Objects::nonNull)
                     .filter(p -> p.isRealProject)
                     .map(Project::cook)
                     .forEach(dependencies::add);
