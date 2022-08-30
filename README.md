@@ -1,7 +1,9 @@
-This tool assists in understanding the relationships between bnd projects in a bnd workspace.
+Purpose
+-------
+Use this tool to find dependent open-liberty projects in the bnd workspace,
+and understand which are already imported into an eclipse workspace.
 
-To use it, invoke the `bnddeps` script in the same directory as this README.
+Run the `px` script that is in the same directory as this README.
+Add this location to the PATH or symlink the script into an existing path location.
 
-Invoke it without args for syntax help.
-
-Invoke it with a list of project names to see the dependencies of those projects.
+Invoke `px help` for syntax help.

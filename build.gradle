@@ -1,26 +1,23 @@
 plugins {
-    id 'java'
     id "application"
 }
 
 ext {
-   javaMainClass = "io.openliberty.tools.bnddeps.Main"
+   javaMainClass = "io.openliberty.tools.pdeps.ProjectExplorer"
 }
 
 tasks.named('wrapper') {
-    jarFile = rootProject.file('.gradle/gradle-wrapper.jar')
+    jarFile = rootProject.file('.gradle-wrapper/gradle-wrapper.jar')
 }
 
 compileJava {
-    sourceCompatibility = '1.8'
-    targetCompatibility = '1.8'
+    sourceCompatibility = '11'
+    targetCompatibility = '11'
 }
 
 application {
     mainClassName = javaMainClass
 }
-
-//jar {manifest {attributes 'Main-Class': javaMainClass}}
 
 group 'io.openliberty.tools'
 version '1.0-SNAPSHOT'
@@ -30,6 +27,9 @@ repositories {
 }
 
 dependencies {
-    implementation group: 'commons-cli', name: 'commons-cli', version: '1.4'
-    testImplementation group: 'junit', name: 'junit', version: '4.12'
+    implementation "org.jgrapht:jgrapht-core:1.5.1"
+    implementation "org.jgrapht:jgrapht-io:1.5.1"
+    implementation "info.picocli:picocli:4.6.3"
+    implementation "org.osgi:osgi.core:8.0.0"
+    implementation "org.apache.commons:commons-collections4:4.4"
 }
