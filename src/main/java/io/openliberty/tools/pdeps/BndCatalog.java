@@ -12,6 +12,7 @@
  */
 package io.openliberty.tools.pdeps;
 
+import org.jgrapht.Graph;
 import org.jgrapht.graph.AsSubgraph;
 import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.graph.EdgeReversedGraph;
@@ -30,6 +31,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.Spliterators;
@@ -87,17 +89,32 @@ class BndCatalog {
         return result;
     }
 
+    private Project maybeFind(String name) {
+        return projectIndex.get(name);
+    }
+
     Stream<Path> getRequiredProjectPaths(Collection<String> projectNames) {
+        return getRequiredProjectPaths(projectNames, false);
+    }
+
+    Stream<Path> getRequiredProjectPaths(Collection<String> projectNames, boolean ignoreMissing) {
+        var deps = getProjectandDependencySubgraph(projectNames, ignoreMissing);
+        var rDeps = new EdgeReversedGraph<>(deps);
+        var topo = new TopologicalOrderIterator<>(rDeps, comparing(p -> p.name));
+        return stream(topo).map(p -> p.root);
+    }
+
+    Graph<Project, ?> getProjectandDependencySubgraph(Collection<String> projectNames, boolean ignoreMissing) {
         // collect the named projects to start with
         var projects = projectNames.stream()
-                .map(this::find)
+                .map(ignoreMissing ? this::maybeFind : this::find)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toUnmodifiableSet());
         var results = new HashSet<Project>();
         // collect all known dependencies, breadth-first
         while (!projects.isEmpty()) {
             results.addAll(projects);
             projects = projects.stream()
-                    .sequential()
                     .map(digraph::outgoingEdgesOf)
                     .flatMap(Set::stream)
                     .map(digraph::getEdgeTarget)
@@ -105,9 +122,7 @@ class BndCatalog {
                     .collect(toUnmodifiableSet());
         }
         var deps = new AsSubgraph<>(digraph, results);
-        var rDeps = new EdgeReversedGraph<>(deps);
-        var topo = new TopologicalOrderIterator<>(rDeps, comparing(p -> p.name));
-        return stream(topo).map(p -> p.root);
+        return deps;
     }
 
     private static <T> Stream<T> stream(Iterator<T> iterator) {
