@@ -33,7 +33,7 @@ import static java.util.stream.Collectors.toSet;
         name = "px",
         mixinStandardHelpOptions = true,
         description = "Project eXplorer",
-        version = "Project eXplorer 0.7.1",
+        version = "Project eXplorer 0.7.2",
         subcommands = HelpCommand.class, // other subcommands are annotated methods
         defaultValueProvider = PropertiesDefaultProvider.class
 )
@@ -55,11 +55,14 @@ public class ProjectExplorer {
         System.exit(exitCode);
     }
 
-    @Command(name = "deps", description = "show dependencies of specified project(s)")
+    @Command(name = "deps", description = "Lists the dependencies of specified project(s) in dependency order. " +
+                    "This shows all the dependencies recursively, including the specified project(s). " +
+                    "Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. "
+    )
     void deps(
-            @Option(names = {"-a", "--show-all"}, description = "show projects already in the eclipse workspace")
+            @Option(names = {"-a", "--show-all"}, description = "Includes projects already in the Eclipse workspace.")
             boolean showAll,
-            @Parameters(arity = "1..*", description = "project(s) whose dependencies are to be displayed")
+            @Parameters(arity = "1..*", description = "The project(s) whose dependencies are to be displayed.")
             List<String> projectNames
     ) {
         getKnownProjects();
@@ -70,28 +73,9 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    @Command(name = "uses", description = "show dependents of specified project(s)")
-    void uses(
-            @Parameters(arity = "1..*", description = "project(s) whose dependents are to be displayed")
-            List<String> projectNames
-    ) {
-        getKnownProjects();
-        getBndCatalog();
-        catalog.getDependentProjectPaths(projectNames)
-                .map(Path::getFileName)
-                .forEach(System.out::println);
-    }
-
-
-
-
-    @Command(name = "known", description = "show projects already known to Eclipse")
-    void known() {
-        getKnownProjects();
-        knownProjects.forEach(System.out::println);
-    }
-
-    @Command(name = "gaps", description = "show missing dependencies of known projects")
+    @Command(name = "gaps",
+            description = "Lists projects needed by but missing from Eclipse. " +
+                    "Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
     void gaps() {
         getKnownProjects();
         getBndCatalog();
@@ -101,7 +85,13 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    @Command(name = "roots", description = "show known projects that are not required by any other projects")
+    @Command(name = "known", description = "Lists projects known to Eclipse in lexicographical order.")
+    void known() {
+        getKnownProjects();
+        knownProjects.forEach(System.out::println);
+    }
+
+    @Command(name = "roots", description = "List the projects in Eclipse that are not used by other Eclipse projects.")
     void roots() {
         getKnownProjects();
         getBndCatalog();
@@ -109,6 +99,19 @@ public class ProjectExplorer {
         graph.vertexSet().stream()
                 .filter(p -> graph.inDegreeOf(p) == 0)
                 .map(p -> p.name)
+                .forEach(System.out::println);
+    }
+
+    @Command(name = "uses", description = "Lists projects that depend directly on specified project(s). " +
+            "Projects are listed by name regardless of inclusion in Eclipse workspace.")
+    void uses(
+            @Parameters(arity = "1..*", description = "The project(s) whose dependents are to be displayed.")
+                    List<String> projectNames
+    ) {
+        getKnownProjects();
+        getBndCatalog();
+        catalog.getDependentProjectPaths(projectNames)
+                .map(Path::getFileName)
                 .forEach(System.out::println);
     }
 
