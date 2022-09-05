@@ -104,6 +104,16 @@ class BndCatalog {
         return stream(topo).map(p -> p.root);
     }
 
+    Stream<Path> getDependentProjectPaths(Collection<String> projectNames) {
+        return projectNames.stream()
+                .map(this::find)
+                .map(digraph::incomingEdgesOf)
+                .flatMap(Set::stream)
+                .map(digraph::getEdgeSource)
+                .map(p -> p.root)
+                .distinct();
+    }
+
     Graph<Project, ?> getProjectandDependencySubgraph(Collection<String> projectNames, boolean ignoreMissing) {
         // collect the named projects to start with
         var projects = projectNames.stream()

@@ -33,7 +33,7 @@ import static java.util.stream.Collectors.toSet;
         name = "px",
         mixinStandardHelpOptions = true,
         description = "Project eXplorer",
-        version = "Project eXplorer 0.7",
+        version = "Project eXplorer 0.7.1",
         subcommands = HelpCommand.class, // other subcommands are annotated methods
         defaultValueProvider = PropertiesDefaultProvider.class
 )
@@ -68,7 +68,21 @@ public class ProjectExplorer {
                 .filter(p -> showAll || !knownProjects.contains(p.getFileName().toString()))
                 .map(Path::toAbsolutePath)
                 .forEach(System.out::println);
-        }
+    }
+
+    @Command(name = "uses", description = "show dependent projects of specified project(s)")
+    void uses(
+            @Parameters(arity = "1..*", description = "project(s) whose dependent projects are to be displayed")
+            List<String> projectNames
+    ) {
+        getKnownProjects();
+        getBndCatalog();
+        catalog.getDependentProjectPaths(projectNames)
+                .map(Path::getFileName)
+                .forEach(System.out::println);
+    }
+
+
 
 
     @Command(name = "known", description = "show projects already known to Eclipse")
