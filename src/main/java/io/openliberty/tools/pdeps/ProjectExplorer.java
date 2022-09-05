@@ -70,9 +70,9 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    @Command(name = "uses", description = "show dependent projects of specified project(s)")
+    @Command(name = "uses", description = "show dependents of specified project(s)")
     void uses(
-            @Parameters(arity = "1..*", description = "project(s) whose dependent projects are to be displayed")
+            @Parameters(arity = "1..*", description = "project(s) whose dependents are to be displayed")
             List<String> projectNames
     ) {
         getKnownProjects();
