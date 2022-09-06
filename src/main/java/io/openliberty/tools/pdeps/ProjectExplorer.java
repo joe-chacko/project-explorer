@@ -23,6 +23,7 @@ import picocli.CommandLine.PropertiesDefaultProvider;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
@@ -32,7 +33,8 @@ import static java.util.stream.Collectors.toSet;
 @Command(
         name = "px",
         mixinStandardHelpOptions = true,
-        description = "Project eXplorer",
+        description = "Project eXplorer - explore relationships between projects in a bnd workspace " +
+                "and their corresponding projects in an eclipse workspace",
         version = "Project eXplorer 0.7.2",
         subcommands = HelpCommand.class, // other subcommands are annotated methods
         defaultValueProvider = PropertiesDefaultProvider.class
@@ -43,7 +45,7 @@ public class ProjectExplorer {
     @Option(names = {"-b", "--bnd-workspace"}, defaultValue = ".", description = "Location of the bnd workspace (default=.)")
     Path bndWorkspace;
 
-    @Option(names = {"-e", "--eclipse-workspace"}, defaultValue = "../../eclipse", description = "Location of the bnd workspace (default=.)")
+    @Option(names = {"-e", "--eclipse-workspace"}, defaultValue = "../../eclipse", description = "Location of the eclipse workspace (default=.)")
     Path eclipseWorkspace;
     private BndCatalog catalog;
     private Set<String> knownProjects;
@@ -55,22 +57,31 @@ public class ProjectExplorer {
         System.exit(exitCode);
     }
 
-    @Command(name = "deps", description = "Lists the dependencies of specified project(s) in dependency order. " +
-                    "This shows all the dependencies recursively, including the specified project(s). " +
+    @Command(name = "deps", description = "Lists specified project(s) and their transitive dependencies in dependency order. " +
                     "Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. "
     )
     void deps(
             @Option(names = {"-a", "--show-all"}, description = "Includes projects already in the Eclipse workspace.")
             boolean showAll,
-            @Parameters(arity = "1..*", description = "The project(s) whose dependencies are to be displayed.")
-            List<String> projectNames
-    ) {
+            @Option(names = {"-n", "--print-names"}, description = "Print names of projects rather than paths.")
+            boolean printNames,
+            @Option(names = {"-e", "--eclipse-ordering"}, description = "Use the unusual ordering of projects in eclipse's import-existing-projects dialog box.")
+            boolean eclipseOrdering,
+            @Parameters(paramLabel = "project", arity = "1..*", description = "The project(s) whose dependencies are to be displayed.")
+            List<String> projectNames) {
         getKnownProjects();
         getBndCatalog();
-        catalog.getRequiredProjectPaths(projectNames)
+        var paths = catalog.getRequiredProjectPaths(projectNames)
                 .filter(p -> showAll || !knownProjects.contains(p.getFileName().toString()))
-                .map(Path::toAbsolutePath)
-                .forEach(System.out::println);
+                .map(printNames ? Path::getFileName : Path::toAbsolutePath);
+        if (eclipseOrdering) paths = paths.sorted(EclipseOrdering.COMPARATOR);
+        paths.forEach(System.out::println);
+    }
+
+    @Command(name = "known", description = "show projects already known to Eclipse")
+    void known() {
+        getKnownProjects();
+        knownProjects.forEach(System.out::println);
     }
 
     @Command(name = "gaps",
@@ -85,33 +96,14 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    @Command(name = "known", description = "Lists projects known to Eclipse in lexicographical order.")
-    void known() {
-        getKnownProjects();
-        knownProjects.forEach(System.out::println);
-    }
-
-    @Command(name = "roots", description = "List the projects in Eclipse that are not used by other Eclipse projects.")
+    @Command(name = "roots", description = "show known projects that are not required by any other projects")
     void roots() {
         getKnownProjects();
         getBndCatalog();
-        var graph = catalog.getProjectandDependencySubgraph(knownProjects, true);
+        var graph = catalog.getProjectAndDependencySubgraph(knownProjects, true);
         graph.vertexSet().stream()
                 .filter(p -> graph.inDegreeOf(p) == 0)
                 .map(p -> p.name)
-                .forEach(System.out::println);
-    }
-
-    @Command(name = "uses", description = "Lists projects that depend directly on specified project(s). " +
-            "Projects are listed by name regardless of inclusion in Eclipse workspace.")
-    void uses(
-            @Parameters(arity = "1..*", description = "The project(s) whose dependents are to be displayed.")
-                    List<String> projectNames
-    ) {
-        getKnownProjects();
-        getBndCatalog();
-        catalog.getDependentProjectPaths(projectNames)
-                .map(Path::getFileName)
                 .forEach(System.out::println);
     }
 
@@ -158,4 +150,13 @@ public class ProjectExplorer {
         System.exit(1);
         throw new Error();
     }
+
+    enum EclipseOrdering implements Comparator<Path> {
+        COMPARATOR;
+
+        @Override
+        public int compare(Path p1, Path p2) { return stringify(p1).compareTo(stringify(p2)); }
+        private String stringify(Path p1) { return p1.toString().replace('.', '\0' ) + '\1'; }
+    }
+
 }
