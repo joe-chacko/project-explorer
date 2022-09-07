@@ -25,9 +25,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static java.util.Collections.unmodifiableSet;
+import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toSet;
 
 @Command(
@@ -35,7 +37,7 @@ import static java.util.stream.Collectors.toSet;
         mixinStandardHelpOptions = true,
         description = "Project eXplorer - explore relationships between projects in a bnd workspace " +
                 "and their corresponding projects in an eclipse workspace",
-        version = "Project eXplorer 0.7.3",
+        version = "Project eXplorer 0.8",
         subcommands = HelpCommand.class, // other subcommands are annotated methods
         defaultValueProvider = PropertiesDefaultProvider.class
 )
@@ -76,6 +78,19 @@ public class ProjectExplorer {
                 .map(printNames ? Path::getFileName : Path::toAbsolutePath);
         if (eclipseOrdering) paths = paths.sorted(EclipseOrdering.COMPARATOR);
         paths.forEach(System.out::println);
+    }
+
+    @Command(name = "ls", description = "Lists projects matching the specified patterns.")
+    void ls(
+            @Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
+            List<String> patterns) {
+        getBndCatalog();
+        Optional.ofNullable(patterns)
+                .filter(not(List::isEmpty))
+                .map(catalog::findProjects)
+                .orElseGet(catalog::allProjects)
+                .map(Path::getFileName)
+                .forEach(System.out::println);
     }
 
     @Command(name = "known", description = "show projects already known to Eclipse")

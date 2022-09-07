@@ -20,8 +20,10 @@ import org.jgrapht.graph.SimpleDirectedGraph;
 import org.jgrapht.traverse.TopologicalOrderIterator;
 
 import java.io.IOException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -30,7 +32,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.Spliterators;
 import java.util.TreeMap;
-import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -47,7 +48,8 @@ class BndCatalog {
     }
 
     private final SimpleDirectedGraph<BndProject, DefaultEdge> digraph = newGraph();
-    private final Map<String, BndProject> projectIndex = new TreeMap<>();
+    private final Map<String, BndProject> nameIndex = new TreeMap<>();
+    private final Map<Path, BndProject> pathIndex = new TreeMap<>();
 
     BndCatalog(Path bndWorkspace) throws IOException {
         // add the vertices
@@ -60,40 +62,54 @@ class BndCatalog {
 
         // index projects by name
         digraph.vertexSet().stream()
-                .peek(p -> projectIndex.put(p.name, p))
+                .peek(p -> nameIndex.put(p.name, p))
+                .peek(p -> pathIndex.put(p.root.getFileName(), p))
                 .filter(BndProject::symbolicNameDiffersFromName)
-                .forEach(p -> projectIndex.put(p.symbolicName, p));
+                .forEach(p -> nameIndex.put(p.symbolicName, p));
+
+        // index projects by path
+        nameIndex.forEach((name, project) -> pathIndex.put(Paths.get(name), project));
 
         // add the edges
         digraph.vertexSet().forEach(p -> p.dependencies.stream()
-                .map(projectIndex::get)
+                .map(nameIndex::get)
                 .filter(Objects::nonNull)
                 .filter(not(p::equals))
                 .forEach(q -> digraph.addEdge(p, q)));
     }
 
-    class Query {
-        Set<BndProject> projects;
-        Query(Stream<BndProject> projects) {
-            this.projects = projects.collect(Collectors.toSet());
-        }
+    Stream<Path> allProjects() {
+        return pathIndex.values().stream()
+                .map(p -> p.root)
+                .sorted()
+                .distinct();
     }
 
-    Query findProjects(Collection<String> projectNames, boolean ignoreMissing) {
-        return new Query(projectNames.stream()
-                .filter(ignoreMissing ? projectIndex::containsKey : n -> true)
-                .map(this::find));
+    Stream<Path> findProjects(Collection<String> patterns) {
+        return patterns.stream()
+                .flatMap(this::findProjects)
+                .map(p -> p.root)
+                .sorted()
+                .distinct();
     }
 
+    Stream<BndProject> findProjects(String pattern) {
+        var set = pathIndex.keySet().stream()
+                .filter(FileSystems.getDefault().getPathMatcher("glob:" + pattern)::matches)
+                .map(pathIndex::get)
+                .collect(toUnmodifiableSet());
+        if (set.isEmpty()) throw new Error("No project found matching pattern \"" + pattern + '"');
+        return set.stream();
+    }
 
     private BndProject find(String name) {
-        BndProject result = projectIndex.get(name);
+        BndProject result = nameIndex.get(name);
         if (null == result) throw new Error("No project found with name \"" + name + '"');
         return result;
     }
 
     private BndProject maybeFind(String name) {
-        return projectIndex.get(name);
+        return nameIndex.get(name);
     }
 
     Stream<Path> getRequiredProjectPaths(Collection<String> projectNames) {
