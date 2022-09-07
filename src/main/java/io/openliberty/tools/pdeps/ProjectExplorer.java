@@ -35,7 +35,7 @@ import static java.util.stream.Collectors.toSet;
         mixinStandardHelpOptions = true,
         description = "Project eXplorer - explore relationships between projects in a bnd workspace " +
                 "and their corresponding projects in an eclipse workspace",
-        version = "Project eXplorer 0.7.2",
+        version = "Project eXplorer 0.7.3",
         subcommands = HelpCommand.class, // other subcommands are annotated methods
         defaultValueProvider = PropertiesDefaultProvider.class
 )
@@ -107,6 +107,19 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
+    @Command(name = "uses", description = "Lists projects that depend directly on specified project(s). " +
+            "Projects are listed by name regardless of inclusion in Eclipse workspace.")
+    void uses(
+            @Parameters(arity = "1..*", description = "The project(s) whose dependents are to be displayed.")
+                    List<String> projectNames
+    ) {
+        getKnownProjects();
+        getBndCatalog();
+        catalog.getDependentProjectPaths(projectNames)
+                .map(Path::getFileName)
+                .forEach(System.out::println);
+    }
+
     BndCatalog getBndCatalog() {
         if (this.catalog == null) {
             if (Files.isDirectory(bndWorkspace)) {
@@ -158,5 +171,4 @@ public class ProjectExplorer {
         public int compare(Path p1, Path p2) { return stringify(p1).compareTo(stringify(p2)); }
         private String stringify(Path p1) { return p1.toString().replace('.', '\0' ) + '\1'; }
     }
-
 }
