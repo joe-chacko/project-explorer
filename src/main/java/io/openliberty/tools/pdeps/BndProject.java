@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Stream;
 
@@ -24,7 +25,10 @@ final class BndProject {
         this.root = root;
         this.name = root.getFileName().toString();
         Properties props = getBndProps(root);
-        this.symbolicName = props.getProperty(BUNDLE_SYMBOLICNAME).replaceFirst(";.*", "");
+        this.symbolicName = Optional.of(props)
+                .map(p -> p.getProperty(BUNDLE_SYMBOLICNAME))
+                .map(val -> val.replaceFirst(";.*", ""))
+                .orElse(null);
         List<String> deps = new ArrayList<>();
         deps.addAll(getPathProp(props, "-buildpath"));
         deps.addAll(getPathProp(props, "-testpath"));
