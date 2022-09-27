@@ -24,7 +24,7 @@ final class BndProject {
         this.root = root;
         this.name = root.getFileName().toString();
         Properties props = getBndProps(root);
-        this.symbolicName = props.getProperty(BUNDLE_SYMBOLICNAME);
+        this.symbolicName = props.getProperty(BUNDLE_SYMBOLICNAME).replaceFirst(";.*", "");
         List<String> deps = new ArrayList<>();
         deps.addAll(getPathProp(props, "-buildpath"));
         deps.addAll(getPathProp(props, "-testpath"));
