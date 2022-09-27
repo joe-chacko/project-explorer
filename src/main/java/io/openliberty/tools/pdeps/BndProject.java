@@ -28,6 +28,7 @@ final class BndProject {
         this.symbolicName = Optional.of(props)
                 .map(p -> p.getProperty(BUNDLE_SYMBOLICNAME))
                 .map(val -> val.replaceFirst(";.*", ""))
+                .map(String::trim)
                 .orElse(null);
         List<String> deps = new ArrayList<>();
         deps.addAll(getPathProp(props, "-buildpath"));
