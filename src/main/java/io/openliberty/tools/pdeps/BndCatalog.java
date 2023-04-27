@@ -12,6 +12,8 @@
  */
 package io.openliberty.tools.pdeps;
 
+import org.apache.commons.collections4.MultiValuedMap;
+import org.apache.commons.collections4.multimap.HashSetValuedHashMap;
 import org.jgrapht.Graph;
 import org.jgrapht.graph.AsSubgraph;
 import org.jgrapht.graph.DefaultEdge;
@@ -49,7 +51,7 @@ class BndCatalog {
 
     private final SimpleDirectedGraph<BndProject, DefaultEdge> digraph = newGraph();
     private final Map<String, BndProject> nameIndex = new TreeMap<>();
-    private final Map<Path, BndProject> pathIndex = new TreeMap<>();
+    private final MultiValuedMap<Path, BndProject> pathIndex = new HashSetValuedHashMap<>();
 
     BndCatalog(Path bndWorkspace) throws IOException {
         // add the vertices
@@ -67,7 +69,9 @@ class BndCatalog {
                 .filter(BndProject::symbolicNameDiffersFromName)
                 .forEach(p -> nameIndex.put(p.symbolicName, p));
 
-        // index projects by path
+        // index projects by name and by symbolic name as paths
+        // (even if those paths don't exist)
+        // to allow globbing searches on them
         nameIndex.forEach((name, project) -> pathIndex.put(Paths.get(name), project));
 
         // add the edges
@@ -95,8 +99,13 @@ class BndCatalog {
 
     Stream<BndProject> findProjects(String pattern) {
         var set = pathIndex.keySet().stream()
+                // Use Java's globbing support to match paths
                 .filter(FileSystems.getDefault().getPathMatcher("glob:" + pattern)::matches)
+                // find all the projects indexed by each matching path
                 .map(pathIndex::get)
+                // create a single stream from all the found collections
+                .flatMap(Collection::stream)
+                // put the results into a set to eliminate duplicates
                 .collect(toUnmodifiableSet());
         if (set.isEmpty()) throw new Error("No project found matching pattern \"" + pattern + '"');
         return set.stream();
