@@ -30,6 +30,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.Spliterators;
@@ -107,7 +108,7 @@ class BndCatalog {
                 .flatMap(Collection::stream)
                 // put the results into a set to eliminate duplicates
                 .collect(toUnmodifiableSet());
-        if (set.isEmpty()) throw new Error("No project found matching pattern \"" + pattern + '"');
+        if (set.isEmpty()) throw new NoSuchElementException("No project found matching pattern \"" + pattern + '"');
         return set.stream();
     }
 

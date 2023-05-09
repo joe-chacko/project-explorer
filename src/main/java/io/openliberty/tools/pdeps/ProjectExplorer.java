@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -85,12 +86,16 @@ public class ProjectExplorer {
             @Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
             List<String> patterns) {
         getBndCatalog();
-        Optional.ofNullable(patterns)
-                .filter(not(List::isEmpty))
-                .map(catalog::findProjects)
-                .orElseGet(catalog::allProjects)
-                .map(Path::getFileName)
-                .forEach(System.out::println);
+        try {
+            Optional.ofNullable(patterns)
+                    .filter(not(List::isEmpty))
+                    .map(catalog::findProjects)
+                    .orElseGet(catalog::allProjects)
+                    .map(Path::getFileName)
+                    .forEach(System.out::println);
+        } catch (NoSuchElementException e) {
+            System.err.println(e.getLocalizedMessage());
+        }
     }
 
     @Command(name = "known", description = "show projects already known to Eclipse")
