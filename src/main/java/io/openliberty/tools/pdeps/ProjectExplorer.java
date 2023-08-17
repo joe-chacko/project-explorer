@@ -20,18 +20,22 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.PropertiesDefaultProvider;
 
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 
 import static java.util.Collections.unmodifiableSet;
 import static java.util.function.Predicate.not;
-import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toCollection;
 import static java.util.stream.Collectors.toSet;
 
 @Command(
@@ -75,6 +79,51 @@ public class ProjectExplorer {
                 .map(printNames ? Path::getFileName : Path::toAbsolutePath);
         if (eclipseOrdering) paths = paths.sorted(EclipseOrdering.COMPARATOR);
         paths.forEach(System.out::println);
+    }
+
+    @Command(description = "Add specified pattern(s) to the focus list. These patterns indicate which projects you intend to edit. If no pattern is specified, just list all the existing focus projects.")
+    void focus(
+            @Parameters(paramLabel = "patterns", description = "The names (or patterns) of project(s) to be edited in eclipse.")
+            List<String> patterns) {
+        var focusList = getFocusList();
+        var matchingProjects = getMatchingProjects(focusList);
+        if (focusList.isEmpty()) {
+            System.out.println("There are no current focus projects.");
+        } else {
+            System.out.println("Current focus projects:");
+            matchingProjects
+                    .stream()
+                    .map("\t"::concat) // indent the focus list
+                    .forEach(System.out::println);
+        }
+        if (null == patterns) return;
+        // there were some patterns, so compute the new list
+        var newFocusList = new ArrayList<>(focusList);
+        newFocusList.addAll(patterns);
+        // write this out to file
+        try (FileWriter fw = new FileWriter(getFocusListFile().toFile()); PrintWriter pw = new PrintWriter(fw)) {
+            newFocusList.forEach(pw::println);
+        } catch (IOException e) {
+            throw error("Failed to open focus file for writing");
+        }
+        // compute the changes
+        var newMatchingProjects = getMatchingProjects(newFocusList);
+        Set<String> added = new TreeSet<>(newMatchingProjects);
+        added.removeAll(matchingProjects);
+        Set<String> deleted = new TreeSet<>(matchingProjects);
+        deleted.removeAll(newMatchingProjects);
+        if (!added.isEmpty()) {
+            System.out.println("New focus projects:");
+            added.stream()
+                    .map("\t"::concat)
+                    .forEach(System.out::println);
+        }
+        if (!deleted.isEmpty()) {
+            System.out.println("Removed focus projects:");
+            deleted.stream()
+                    .map("\t"::concat)
+                    .forEach(System.out::println);
+        }
     }
 
     @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
@@ -158,24 +207,40 @@ public class ProjectExplorer {
         return this.knownProjects;
     }
 
-    private List<String> getMatchingProjects(List<String> patterns) {
-        return getBndCatalog()
-                .findProjects(patterns)
-                .map(Path::getFileName)
-                .map(Path::toString)
-                .collect(toList());
+    private Set<String> getMatchingProjects(List<String> patterns) {
+        Set<String> set = new TreeSet<>();
+        for (String pattern: patterns) {
+            try {
+                boolean exclude = pattern.startsWith("!");
+                if (exclude) pattern = pattern.substring(1);
+                getBndCatalog().findProjects(pattern).map(Path::getFileName).map(Path::toString).forEach(exclude ? set::remove : set::add);
+            } catch (NoSuchElementException e) {
+                System.err.printf("error: no files found matching pattern '%s'%n", pattern);
+            }
+        }
+        return set;
     }
 
-    private List<String> getAllProjects() {
+    private Set<String> getAllProjects() {
         return getBndCatalog()
                 .allProjects()
                 .map(Path::getFileName)
                 .map(Path::toString)
-                .collect(toList());
+                .collect(toCollection(TreeSet::new));
     }
 
     private Path getEclipseDotProjectsDir() { return verifyDir(".projects dir", getEclipseWorkspace().resolve(".metadata/.plugins/org.eclipse.core.resources/.projects")); }
 
+    private List<String> getFocusList() {
+        try {
+            return Files.readAllLines(getFocusListFile());
+        } catch (IOException e) {
+            throw error("Could not open the focus file for reading");
+        }
+    }
+
+    private Path getFocusListFile() { return verifyOrCreateFile("focus list file", getEclipsePxDir().resolve("focus-list")); }
+    private Path getEclipsePxDir() { return verifyOrCreateDir("eclipse px settings dir", getEclipseWorkspace().resolve(".px")); }
     private Path getEclipseWorkspace() { return verifyDir("eclipse workspace", eclipseWorkspace); }
 
     private static Path verifyOrCreateFile(String desc, Path file) {

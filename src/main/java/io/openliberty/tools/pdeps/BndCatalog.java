@@ -90,15 +90,7 @@ class BndCatalog {
                 .distinct();
     }
 
-    Stream<Path> findProjects(Collection<String> patterns) {
-        return patterns.stream()
-                .flatMap(this::findProjects)
-                .map(p -> p.root)
-                .sorted()
-                .distinct();
-    }
-
-    Stream<BndProject> findProjects(String pattern) {
+    Stream<Path> findProjects(String pattern) {
         var set = pathIndex.keySet().stream()
                 // Use Java's globbing support to match paths
                 .filter(FileSystems.getDefault().getPathMatcher("glob:" + pattern)::matches)
@@ -106,6 +98,7 @@ class BndCatalog {
                 .map(pathIndex::get)
                 // create a single stream from all the found collections
                 .flatMap(Collection::stream)
+                .map(p -> p.root)
                 // put the results into a set to eliminate duplicates
                 .collect(toUnmodifiableSet());
         if (set.isEmpty()) throw new NoSuchElementException("No project found matching pattern \"" + pattern + '"');
