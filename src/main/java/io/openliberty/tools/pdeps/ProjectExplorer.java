@@ -78,9 +78,25 @@ public class ProjectExplorer {
         paths.forEach(System.out::println);
     }
 
+    @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
+    void gaps() {
+        getKnownProjects();
+        getBndCatalog();
+        catalog.getRequiredProjectPaths(knownProjects, true)
+                .filter(p -> !knownProjects.contains(p.getFileName().toString()))
+                .map(Path::toAbsolutePath)
+                .forEach(System.out::println);
+    }
+
+    @Command(description = "show projects already known to Eclipse")
+    void known() {
+        getKnownProjects();
+        knownProjects.forEach(System.out::println);
+    }
+
     @Command(aliases = "ls", description = "Lists projects matching the specified patterns.")
     void list(@Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
-            List<String> patterns) {
+              List<String> patterns) {
         getBndCatalog();
         try {
             Optional.ofNullable(patterns)
@@ -94,22 +110,6 @@ public class ProjectExplorer {
         }
     }
 
-    @Command(description = "show projects already known to Eclipse")
-    void known() {
-        getKnownProjects();
-        knownProjects.forEach(System.out::println);
-    }
-
-    @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
-    void gaps() {
-        getKnownProjects();
-        getBndCatalog();
-        catalog.getRequiredProjectPaths(knownProjects, true)
-                .filter(p -> !knownProjects.contains(p.getFileName().toString()))
-                .map(Path::toAbsolutePath)
-                .forEach(System.out::println);
-    }
-
     @Command(description = "show known projects that are not required by any other projects")
     void roots() {
         getKnownProjects();
@@ -121,8 +121,7 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    @Command(name = "uses", description = "Lists projects that depend directly on specified project(s). " +
-            "Projects are listed by name regardless of inclusion in Eclipse workspace.")
+    @Command(name = "uses", description = "Lists projects that depend directly on specified project(s). Projects are listed by name regardless of inclusion in Eclipse workspace.")
     void uses(
             @Parameters(arity = "1..*", description = "The project(s) whose dependents are to be displayed.")
                     List<String> projectNames
@@ -134,7 +133,7 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    BndCatalog getBndCatalog() {
+    private BndCatalog getBndCatalog() {
         if (this.catalog == null) {
             if (Files.isDirectory(bndWorkspace)) {
                 try {
@@ -149,7 +148,7 @@ public class ProjectExplorer {
         return this.catalog;
     }
 
-    Set<String> getKnownProjects() {
+    private Set<String> getKnownProjects() {
         if (this.knownProjects == null) {
             if (!!!Files.isDirectory(eclipseWorkspace))
                 throw error("Could not locate eclipse workspace: " + eclipseWorkspace);
