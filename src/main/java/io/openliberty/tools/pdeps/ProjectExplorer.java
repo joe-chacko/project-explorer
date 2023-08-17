@@ -60,9 +60,7 @@ public class ProjectExplorer {
         System.exit(exitCode);
     }
 
-    @Command(name = "deps", description = "Lists specified project(s) and their transitive dependencies in dependency order. " +
-                    "Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. "
-    )
+    @Command(description = "Lists specified project(s) and their transitive dependencies in dependency order. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
     void deps(
             @Option(names = {"-a", "--show-all"}, description = "Includes projects already in the Eclipse workspace.")
             boolean showAll,
@@ -81,9 +79,8 @@ public class ProjectExplorer {
         paths.forEach(System.out::println);
     }
 
-    @Command(name = "ls", description = "Lists projects matching the specified patterns.")
-    void ls(
-            @Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
+    @Command(description = "Lists projects matching the specified patterns.")
+    void ls(@Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
             List<String> patterns) {
         getBndCatalog();
         try {
@@ -98,15 +95,13 @@ public class ProjectExplorer {
         }
     }
 
-    @Command(name = "known", description = "show projects already known to Eclipse")
+    @Command(description = "show projects already known to Eclipse")
     void known() {
         getKnownProjects();
         knownProjects.forEach(System.out::println);
     }
 
-    @Command(name = "gaps",
-            description = "Lists projects needed by but missing from Eclipse. " +
-                    "Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
+    @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
     void gaps() {
         getKnownProjects();
         getBndCatalog();
@@ -116,7 +111,7 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    @Command(name = "roots", description = "show known projects that are not required by any other projects")
+    @Command(description = "show known projects that are not required by any other projects")
     void roots() {
         getKnownProjects();
         getBndCatalog();
