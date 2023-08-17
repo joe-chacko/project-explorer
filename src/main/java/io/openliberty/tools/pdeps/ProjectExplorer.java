@@ -23,14 +23,15 @@ import picocli.CommandLine.PropertiesDefaultProvider;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
 import static java.util.Collections.unmodifiableSet;
 import static java.util.function.Predicate.not;
+import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 
 @Command(
@@ -43,8 +44,6 @@ import static java.util.stream.Collectors.toSet;
         defaultValueProvider = PropertiesDefaultProvider.class
 )
 public class ProjectExplorer {
-    public static final String ECLIPSE_CORE_RESOURCES_PROJECTS = ".metadata/.plugins/org.eclipse.core.resources/.projects";
-
     @Option(names = {"-b", "--bnd-workspace"}, defaultValue = ".", description = "Location of the bnd workspace (default=.)")
     Path bndWorkspace;
 
@@ -97,17 +96,11 @@ public class ProjectExplorer {
     @Command(aliases = "ls", description = "Lists projects matching the specified patterns.")
     void list(@Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
               List<String> patterns) {
-        getBndCatalog();
-        try {
-            Optional.ofNullable(patterns)
-                    .filter(not(List::isEmpty))
-                    .map(catalog::findProjects)
-                    .orElseGet(catalog::allProjects)
-                    .map(Path::getFileName)
-                    .forEach(System.out::println);
-        } catch (NoSuchElementException e) {
-            System.err.println(e.getLocalizedMessage());
-        }
+        Optional.ofNullable(patterns)
+                .filter(not(List::isEmpty))
+                .map(this::getMatchingProjects)
+                .orElseGet(this::getAllProjects)
+                .forEach(System.out::println);
     }
 
     @Command(description = "show known projects that are not required by any other projects")
@@ -150,12 +143,7 @@ public class ProjectExplorer {
 
     private Set<String> getKnownProjects() {
         if (this.knownProjects == null) {
-            if (!!!Files.isDirectory(eclipseWorkspace))
-                throw error("Could not locate eclipse workspace: " + eclipseWorkspace);
-            final Path dotProjectsDir = eclipseWorkspace.resolve(ECLIPSE_CORE_RESOURCES_PROJECTS);
-            if (!!!Files.isDirectory(dotProjectsDir))
-                throw error("Could not locate .projects dir: " + dotProjectsDir,
-                        "Please fix this tool's broken logic and submit a GitHub pull request");
+            Path dotProjectsDir = getEclipseDotProjectsDir();
             try {
                 this.knownProjects = unmodifiableSet(Files.list(dotProjectsDir)
                         .filter(Files::isDirectory)
@@ -170,7 +158,51 @@ public class ProjectExplorer {
         return this.knownProjects;
     }
 
-    private Error error(String message, String...details) {
+    private List<String> getMatchingProjects(List<String> patterns) {
+        return getBndCatalog()
+                .findProjects(patterns)
+                .map(Path::getFileName)
+                .map(Path::toString)
+                .collect(toList());
+    }
+
+    private List<String> getAllProjects() {
+        return getBndCatalog()
+                .allProjects()
+                .map(Path::getFileName)
+                .map(Path::toString)
+                .collect(toList());
+    }
+
+    private Path getEclipseDotProjectsDir() { return verifyDir(".projects dir", getEclipseWorkspace().resolve(".metadata/.plugins/org.eclipse.core.resources/.projects")); }
+
+    private Path getEclipseWorkspace() { return verifyDir("eclipse workspace", eclipseWorkspace); }
+
+    private static Path verifyOrCreateFile(String desc, Path file) {
+        if (Files.exists(file) && !Files.isDirectory(file) && Files.isWritable(file)) return file;
+        try {
+            return Files.createFile(file);
+        } catch (IOException e) {
+            throw error("Could not create " + desc + ": " + file);
+        }
+    }
+
+    private static Path verifyOrCreateDir(String desc, Path dir) {
+        if (Files.isDirectory(dir)) return dir;
+        if (Files.exists(dir)) throw error("Could not overwrite " + desc + " as directory: " + dir);
+        try {
+            return Files.createDirectory(dir);
+        } catch (IOException e) {
+            throw error("Could not create " + desc + ": " + dir);
+        }
+    }
+
+    private static Path verifyDir(String desc, Path dir) {
+        if (Files.isDirectory(dir)) return dir;
+        throw error("Could not locate " + desc + ": " + dir);
+    }
+
+    private static Error error(String message, String...details) {
         System.err.println("ERROR: " + message);
         for (String detail: details) System.err.println(detail);
         System.exit(1);
