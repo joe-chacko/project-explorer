@@ -54,10 +54,9 @@ public class ProjectExplorer {
     private Set<String> knownProjects;
 
     public static void main(String...args) {
-        ProjectExplorer pdeps = new ProjectExplorer();
-        CommandLine commandLine = new CommandLine(pdeps);
-        int exitCode = commandLine.execute(args);
-        System.exit(exitCode);
+        System.exit(new CommandLine(new ProjectExplorer())
+                .setAbbreviatedSubcommandsAllowed(true)
+                .execute(args));
     }
 
     @Command(description = "Lists specified project(s) and their transitive dependencies in dependency order. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
