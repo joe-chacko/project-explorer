@@ -79,8 +79,8 @@ public class ProjectExplorer {
         paths.forEach(System.out::println);
     }
 
-    @Command(description = "Lists projects matching the specified patterns.")
-    void ls(@Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
+    @Command(aliases = "ls", description = "Lists projects matching the specified patterns.")
+    void list(@Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
             List<String> patterns) {
         getBndCatalog();
         try {
