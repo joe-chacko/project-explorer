@@ -21,6 +21,8 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.ParentCommand;
 import picocli.CommandLine.PropertiesDefaultProvider;
 
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -33,11 +35,14 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Stream;
 
+import static java.awt.Toolkit.getDefaultToolkit;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableSet;
 import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toCollection;
+import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 
 @Command(
@@ -110,17 +115,8 @@ public class ProjectExplorer {
             System.out.println("Focus list cleared");
         }
 
-        @Command(description = "List focus projects")
-        void list() {
-            var focusList = px.getFocusList();
-            printFocusList(focusList);
-            System.out.println("Focus projects:");
-            var projects = px.getMatchingProjects(focusList);
-            projects.stream().map("\t"::concat).forEach(System.out::println);
-        }
-
-        @Command(description = "Remove the specified pattern(s) from the focus list.")
-        void remove(
+        @Command(aliases = "remove", description = "Remove the specified pattern(s) from the focus list.")
+        void delete(
                 @Parameters(paramLabel = "patterns", arity = "1..*", description = "The names (or patterns) of project(s) no longer to be edited in eclipse.")
                 List<String> patterns
         ) {
@@ -131,6 +127,15 @@ public class ProjectExplorer {
             writeFocusList(newFocusList);
             printFocusList(newFocusList);
             summariseChanges(px.getMatchingProjects(oldFocusList), px.getMatchingProjects(newFocusList));
+        }
+
+        @Command(description = "List focus projects")
+        void list() {
+            var focusList = px.getFocusList();
+            printFocusList(focusList);
+            System.out.println("Focus projects:");
+            var projects = px.getMatchingProjects(focusList);
+            projects.stream().map("\t"::concat).forEach(System.out::println);
         }
 
         private void writeFocusList(List<String> newFocusList) {
@@ -192,6 +197,25 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
+    @Command(description = "Print the next project to add to eclipse based on the current project focus, and copy it to the clipboard.")
+    void next(){
+        var focusProjects = getMatchingProjects(getFocusList());
+        var users = getBndCatalog().getDependentProjectPaths(focusProjects).map(Path::getFileName).map(Path::toString).collect(toSet());
+        var all = Stream.concat(focusProjects.stream(), users.stream()).collect(toSet());
+        var needed = getBndCatalog().getRequiredProjectPaths(all)
+                .filter(p -> !getKnownProjects().contains(p.getFileName().toString()))
+                .map(Path::toAbsolutePath)
+                .map(Path::toString)
+                .collect(toList());
+        if (needed.isEmpty()) {
+            System.out.println("All caught up!");
+            return;
+        }
+        String next = needed.get(0);
+        System.out.printf("%s (%d more to go)%n", next, needed.size() - 1);
+        getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(next), null);
+    }
+
     @Command(description = "show known projects that are not required by any other projects")
     void roots() {
         getKnownProjects();
@@ -209,8 +233,7 @@ public class ProjectExplorer {
                     List<String> projectNames
     ) {
         getKnownProjects();
-        getBndCatalog();
-        catalog.getDependentProjectPaths(projectNames)
+        getBndCatalog().getDependentProjectPaths(projectNames)
                 .map(Path::getFileName)
                 .forEach(System.out::println);
     }
