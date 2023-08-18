@@ -32,6 +32,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.Spliterators;
 import java.util.TreeMap;
@@ -82,6 +83,10 @@ class BndCatalog {
                 .filter(not(p::equals))
                 .forEach(q -> digraph.addEdge(p, q)));
     }
+
+    boolean hasProject(String name) { return nameIndex.containsKey(name); }
+
+    Path getProject(String name) { return find(name).root; }
 
     Stream<Path> allProjects() {
         return pathIndex.values().stream()

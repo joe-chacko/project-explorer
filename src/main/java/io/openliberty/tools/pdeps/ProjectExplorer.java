@@ -29,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -43,6 +44,7 @@ import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toCollection;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
+import static java.util.stream.Stream.concat;
 
 @Command(
         name = "px",
@@ -88,8 +90,10 @@ public class ProjectExplorer {
         paths.forEach(System.out::println);
     }
 
-    @Command(name = "focus", description = "Indicate which projects you intend to edit. This allows more useful analysis of dependencies.")
+    @Command(name = "focus", description = "Indicate which projects you intend to edit. This allows more useful analysis of dependencies. " +
+            "The focus subcommand will consider the dependencies of the focused projects and their direct users. ")
     static class Focus {
+        public static final String KLUGE = "kluge:";
         @ParentCommand
         ProjectExplorer px;
 
@@ -98,14 +102,14 @@ public class ProjectExplorer {
                 @Parameters(paramLabel = "patterns", arity = "1..*",  description = "The names (or patterns) of project(s) to be edited in eclipse.")
                 List<String> patterns
         ) {
-            var oldFocusList = px.getFocusList();
+            var oldFocusList = getRawFocusList();
             // compute the new list
             var newFocusList = new ArrayList<>(oldFocusList);
             newFocusList.addAll(patterns);
             // write this out to file
             writeFocusList(newFocusList);
             printFocusList(newFocusList);
-            summariseChanges(px.getMatchingProjects(oldFocusList), px.getMatchingProjects(newFocusList));
+            summariseChanges(oldFocusList, newFocusList);
         }
 
         @Command(description = "Clear the focus list completely.")
@@ -119,40 +123,110 @@ public class ProjectExplorer {
                 @Parameters(paramLabel = "patterns", arity = "1..*", description = "The names (or patterns) of project(s) no longer to be edited in eclipse.")
                 List<String> patterns
         ) {
-            var oldFocusList = px.getFocusList();
+            var oldFocusList = getRawFocusList();
             // compute the new list
             var newFocusList = new ArrayList<>(oldFocusList);
             newFocusList.removeAll(patterns);
             writeFocusList(newFocusList);
             printFocusList(newFocusList);
-            summariseChanges(px.getMatchingProjects(oldFocusList), px.getMatchingProjects(newFocusList));
+            summariseChanges(oldFocusList, newFocusList);
         }
 
-        @Command(description = "List focus projects")
+        @Command(aliases={"kludge"}, description = "Adds the specified project as a kluge for undetected dependencies that show up as errors in eclipse. This will NOT pull in the users of this project.")
+        void kluge(
+                @Parameters(description = "The name of a project to add")
+                String project
+        ) {
+            if (!px.getBndCatalog().hasProject(project)) throw error("Unable to find project: " + project);
+            var oldFocusList = getRawFocusList();
+            // compute the new list
+            var newFocusList = new ArrayList<>(oldFocusList);
+            newFocusList.add(encodeKluge(project));
+            // write this out to file
+            writeFocusList(newFocusList);
+            printFocusList(newFocusList);
+            summariseChanges(oldFocusList, newFocusList);
+        }
+
+        @Command(description = "List focus projects.")
         void list() {
-            var focusList = px.getFocusList();
+            var focusList = getRawFocusList();
             printFocusList(focusList);
-            System.out.println("Focus projects:");
-            var projects = px.getMatchingProjects(focusList);
-            projects.stream().map("\t"::concat).forEach(System.out::println);
+            System.out.printf("%nFocus projects:%n");
+            formatProjects(focusList).map("\t"::concat).forEach(System.out::println);
+        }
+
+        @Command(description = "Print the next project to add to eclipse based on the current project focus, and copy it to the clipboard.")
+        void next(
+                @Option(names = {"-x", "--exhaustive"}, description = "Prints all the remaining projects to be imported. Does NOT copy anything to the clipboard.")
+                boolean exhaustive
+        ) {
+            Stream<Path> allNeededProjects = getAllRequiredProjects();
+            var needed = allNeededProjects
+                    .filter(p -> !px.getKnownProjects().contains(p.getFileName().toString()))
+                    .map(Path::toAbsolutePath)
+                    .map(Path::toString)
+                    .collect(toList());
+            if (needed.isEmpty()) {
+                System.err.println("Nothing more to import!");
+                System.exit(1);
+            }
+            if (exhaustive) {
+                needed.forEach(System.out::println);
+            } else {
+                String next = needed.get(0);
+                System.out.printf("%s (%d more to go)%n", next, needed.size() - 1);
+                getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(next), null);
+            }
+        }
+
+        @Command(description = "Identify orphaned projects in eclipse not needed for editing the current focus projects")
+        void orphans() {
+            var required = getAllRequiredProjects().map(Path::getFileName).map(Path::toString).collect(toSet());
+            var known = new TreeSet<>(px.getKnownProjects());
+            known.removeAll(required);
+            System.out.println("The following projects are no longer required for the current focus:");
+            known.stream().map("\t"::concat).forEach(System.out::println);
+            System.out.println("These projects can be closed, or deleted from eclipse (but not from the filesystem).");
+        }
+
+        @Command(aliases={"unkludge"}, description = "Removes the specified project from the list of kluges.")
+        void unkluge(
+                @Parameters(description = "The name of a project to remove")
+                String project
+        ) {
+            var klugeProject = KLUGE + project;
+            var oldFocusList = getRawFocusList();
+            if (!oldFocusList.contains(klugeProject)) throw error("Unable to find kluge in list: " + project);
+            // compute the new list
+            var newFocusList = new ArrayList<>(oldFocusList);
+            newFocusList.remove(encodeKluge(project));
+            // write this out to file
+            writeFocusList(newFocusList);
+            printFocusList(newFocusList);
+            summariseChanges(oldFocusList, newFocusList);
         }
 
         private void writeFocusList(List<String> newFocusList) {
             // write this out to file
-            try (FileWriter fw = new FileWriter(px.getFocusListFile().toFile()); PrintWriter pw = new PrintWriter(fw)) {
+            try (FileWriter fw = new FileWriter(getFocusListFile().toFile()); PrintWriter pw = new PrintWriter(fw)) {
                 newFocusList.forEach(pw::println);
             } catch (IOException e) {
                 throw error("Failed to open focus file for writing");
             }
         }
 
-        private static void printFocusList(List<String> focusList) {
-            System.out.println("Focus list:");
-            focusList.stream().map("\t"::concat).forEach(System.out::println);
-            if (focusList.stream().anyMatch(s -> s.startsWith("!"))) System.out.println("N.B. When using exclusion (a pattern preceded by an exclamation mark), order is important. Inclusions and exclusions happens in list order.");
+        private void printFocusList(List<String> rawFocusList) {
+            System.out.printf("%nKluge list:%n");
+            getKlugeProjects(rawFocusList).map("\t"::concat).forEach(System.out::println);
+            System.out.printf("%nFocus list:%n");
+            getFocusPatterns(rawFocusList).map("\t"::concat).forEach(System.out::println);
+            if (rawFocusList.stream().anyMatch(s -> s.startsWith("!"))) System.out.println("N.B. When using exclusion (a pattern preceded by an exclamation mark), order is important. Inclusions and exclusions happens in list order.");
         }
 
-        private static void summariseChanges(Set<String> before, Set<String> after) {
+        private void summariseChanges(List<String> oldFocusList, List<String> newFocusList) {
+            var before = formatProjects(oldFocusList).collect(toSet());
+            var after = formatProjects(newFocusList).collect(toSet());
             Set<String> union = new TreeSet<>(before);
             union.addAll(after);
             Set<String> intersection = new TreeSet<>(before);
@@ -161,13 +235,52 @@ public class ProjectExplorer {
             added.removeAll(before);
             Set<String> deleted = new TreeSet<>(before);
             deleted.removeAll(after);
-            System.out.println("Focused projects:");
+            System.out.printf("%nFocused projects:%n");
             union.stream()
                     .map(p -> (added.contains(p) ? "+" : deleted.contains(p) ? "-" : " ") + p)
                     .map("\t"::concat)
                     .forEach(System.out::println);
             System.out.printf("%d added, %d removed, %d unchanged.%n", added.size(), deleted.size(), intersection.size());
         }
+
+        private Stream<String> formatProjects(List<String> focusList) {
+            var kluges = getKlugeProjects(focusList).map(s -> s + " (kluge)");
+            var focuses = px.getMatchingProjects(getFocusPatterns(focusList).collect(toList())).stream();
+            return concat(kluges, focuses);
+        }
+
+        private Stream<Path> getAllRequiredProjects() {
+            var focusProjects = px.getMatchingProjects(getFocusPatterns().collect(toList()));
+            var users = px.getBndCatalog().getDependentProjectPaths(focusProjects).map(Path::getFileName).map(Path::toString);
+            var all = concat(focusProjects.stream(), users).collect(toSet());
+            var mainList = px.getBndCatalog().getRequiredProjectPaths(all).collect(toList());
+            var kluges = getKlugeProjects()
+                    .map(px.getBndCatalog()::getProject)
+                    .map(Path::getFileName).map(Path::toString)
+                    .collect(toSet());
+            var klugeList = px.getBndCatalog().getRequiredProjectPaths(kluges).collect(toList());
+            // need to prioritise any identified kluges and their dependencies
+            // and only then consider the remaining projects
+            var remainder = mainList.stream().filter(not(new HashSet<>(klugeList)::contains));
+            return concat(klugeList.stream(), remainder);
+        }
+
+        private Stream<String> getKlugeProjects() { return getKlugeProjects(getRawFocusList()); }
+        private Stream<String> getFocusPatterns() { return getFocusPatterns(getRawFocusList()); }
+        private Stream<String> getKlugeProjects(List<String> rawFocusList) { return rawFocusList.stream().filter(this::isKluge).map(this::decodeKluge); }
+        private Stream<String> getFocusPatterns(List<String> rawFocusList) { return rawFocusList.stream().filter(not(this::isKluge)); }
+        private String decodeKluge(String pattern) { return pattern.substring(KLUGE.length()); }
+        private String encodeKluge(String project) { return KLUGE + project; }
+        private boolean isKluge(String pattern) { return pattern.startsWith(KLUGE); }
+        private List<String> getRawFocusList() {
+            try {
+                return Files.readAllLines(getFocusListFile());
+            } catch (IOException e) {
+                throw error("Could not open the focus file for reading");
+            }
+        }
+
+        private Path getFocusListFile() { return verifyOrCreateFile("focus list file", px.getEclipsePxDir().resolve("focus-list")); }
     }
 
     @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
@@ -196,33 +309,6 @@ public class ProjectExplorer {
                 .forEach(System.out::println);
     }
 
-    @Command(description = "Print the next project to add to eclipse based on the current project focus, and copy it to the clipboard.")
-    void next() {
-        Stream<Path> allNeededProjects = getAllRequiredProjectsForFocus();
-        var needed = allNeededProjects
-                .filter(p -> !getKnownProjects().contains(p.getFileName().toString()))
-                .map(Path::toAbsolutePath)
-                .map(Path::toString)
-                .collect(toList());
-        if (needed.isEmpty()) {
-            System.out.println("No more projects to import!");
-            System.exit(1);
-        }
-        String next = needed.get(0);
-        System.out.printf("%s (%d more to go)%n", next, needed.size() - 1);
-        getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(next), null);
-    }
-
-    @Command(description = "Identify oprhaned projects in eclipse not needed for editing the current focus projects")
-    void orphans() {
-        var required = getAllRequiredProjectsForFocus().map(Path::getFileName).map(Path::toString).collect(toSet());
-        var known = new TreeSet<>(getKnownProjects());
-        known.removeAll(required);
-        System.out.println("The following projects are no longer required for the current focus:");
-        known.stream().map("\t"::concat).forEach(System.out::println);
-        System.out.println("These projects can be closed, or deleted from eclipse (but not from the filesystem).");
-    }
-
     @Command(description = "show known projects that are not required by any other projects")
     void roots() {
         getKnownProjects();
@@ -243,14 +329,6 @@ public class ProjectExplorer {
         getBndCatalog().getDependentProjectPaths(projectNames)
                 .map(Path::getFileName)
                 .forEach(System.out::println);
-    }
-
-    private Stream<Path> getAllRequiredProjectsForFocus() {
-        var focusProjects = getMatchingProjects(getFocusList());
-        var users = getBndCatalog().getDependentProjectPaths(focusProjects).map(Path::getFileName).map(Path::toString).collect(toSet());
-        var all = Stream.concat(focusProjects.stream(), users.stream()).collect(toSet());
-        var allNeededProjects = getBndCatalog().getRequiredProjectPaths(all);
-        return allNeededProjects;
     }
 
     private BndCatalog getBndCatalog() {
@@ -287,15 +365,15 @@ public class ProjectExplorer {
 
     private Set<String> getMatchingProjects(List<String> patterns) {
         Set<String> set = new TreeSet<>();
-        for (String pattern: patterns) {
+        patterns.forEach(pattern -> {
             try {
                 boolean exclude = pattern.startsWith("!");
                 if (exclude) pattern = pattern.substring(1);
                 getBndCatalog().findProjects(pattern).map(Path::getFileName).map(Path::toString).forEach(exclude ? set::remove : set::add);
             } catch (NoSuchElementException e) {
-                System.err.printf("error: no files found matching pattern '%s'%n", pattern);
+                System.err.printf("error: no projects found matching pattern '%s'%n", pattern);
             }
-        }
+        });
         return set;
     }
 
@@ -308,16 +386,6 @@ public class ProjectExplorer {
     }
 
     private Path getEclipseDotProjectsDir() { return verifyDir(".projects dir", getEclipseWorkspace().resolve(".metadata/.plugins/org.eclipse.core.resources/.projects")); }
-
-    private List<String> getFocusList() {
-        try {
-            return Files.readAllLines(getFocusListFile());
-        } catch (IOException e) {
-            throw error("Could not open the focus file for reading");
-        }
-    }
-
-    private Path getFocusListFile() { return verifyOrCreateFile("focus list file", getEclipsePxDir().resolve("focus-list")); }
     private Path getEclipsePxDir() { return verifyOrCreateDir("eclipse px settings dir", getEclipseWorkspace().resolve(".px")); }
     private Path getEclipseWorkspace() { return verifyDir("eclipse workspace", eclipseWorkspace); }
 
