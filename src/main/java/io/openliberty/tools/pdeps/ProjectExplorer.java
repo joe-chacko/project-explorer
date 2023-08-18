@@ -90,8 +90,11 @@ public class ProjectExplorer {
         paths.forEach(System.out::println);
     }
 
-    @Command(name = "focus", description = "Indicate which projects you intend to edit. This allows more useful analysis of dependencies. " +
-            "The focus subcommand will consider the dependencies of the focused projects and their direct users. ")
+    @Command(
+            name = "focus",
+            description = "Indicate which projects you intend to edit. This allows more useful analysis of dependencies. The focus subcommand will consider the dependencies of the focused projects and their direct users. ",
+            subcommands = HelpCommand.class
+    )
     static class Focus {
         public static final String KLUGE = "kluge:";
         @ParentCommand
