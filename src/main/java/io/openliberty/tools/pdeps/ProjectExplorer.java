@@ -21,7 +21,6 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.ParentCommand;
 import picocli.CommandLine.PropertiesDefaultProvider;
 
-import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -198,11 +197,9 @@ public class ProjectExplorer {
     }
 
     @Command(description = "Print the next project to add to eclipse based on the current project focus, and copy it to the clipboard.")
-    void next(){
-        var focusProjects = getMatchingProjects(getFocusList());
-        var users = getBndCatalog().getDependentProjectPaths(focusProjects).map(Path::getFileName).map(Path::toString).collect(toSet());
-        var all = Stream.concat(focusProjects.stream(), users.stream()).collect(toSet());
-        var needed = getBndCatalog().getRequiredProjectPaths(all)
+    void next() {
+        Stream<Path> allNeededProjects = getAllRequiredProjectsForFocus();
+        var needed = allNeededProjects
                 .filter(p -> !getKnownProjects().contains(p.getFileName().toString()))
                 .map(Path::toAbsolutePath)
                 .map(Path::toString)
@@ -214,6 +211,16 @@ public class ProjectExplorer {
         String next = needed.get(0);
         System.out.printf("%s (%d more to go)%n", next, needed.size() - 1);
         getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(next), null);
+    }
+
+    @Command(description = "Identify oprhaned projects in eclipse not needed for editing the current focus projects")
+    void orphans() {
+        var required = getAllRequiredProjectsForFocus().map(Path::getFileName).map(Path::toString).collect(toSet());
+        var known = new TreeSet<>(getKnownProjects());
+        known.removeAll(required);
+        System.out.println("The following projects are no longer required for the current focus:");
+        known.stream().map("\t"::concat).forEach(System.out::println);
+        System.out.println("These projects can be closed, or deleted from eclipse (but not from the filesystem).");
     }
 
     @Command(description = "show known projects that are not required by any other projects")
@@ -236,6 +243,14 @@ public class ProjectExplorer {
         getBndCatalog().getDependentProjectPaths(projectNames)
                 .map(Path::getFileName)
                 .forEach(System.out::println);
+    }
+
+    private Stream<Path> getAllRequiredProjectsForFocus() {
+        var focusProjects = getMatchingProjects(getFocusList());
+        var users = getBndCatalog().getDependentProjectPaths(focusProjects).map(Path::getFileName).map(Path::toString).collect(toSet());
+        var all = Stream.concat(focusProjects.stream(), users.stream()).collect(toSet());
+        var allNeededProjects = getBndCatalog().getRequiredProjectPaths(all);
+        return allNeededProjects;
     }
 
     private BndCatalog getBndCatalog() {
