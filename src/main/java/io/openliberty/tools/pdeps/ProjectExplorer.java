@@ -205,8 +205,8 @@ public class ProjectExplorer {
                 .map(Path::toString)
                 .collect(toList());
         if (needed.isEmpty()) {
-            System.out.println("All caught up!");
-            return;
+            System.out.println("No more projects to import!");
+            System.exit(1);
         }
         String next = needed.get(0);
         System.out.printf("%s (%d more to go)%n", next, needed.size() - 1);
