@@ -18,6 +18,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.HelpCommand;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.ParentCommand;
 import picocli.CommandLine.PropertiesDefaultProvider;
 
 import java.io.FileWriter;
@@ -33,6 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableSet;
 import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toCollection;
@@ -44,7 +46,7 @@ import static java.util.stream.Collectors.toSet;
         description = "Project eXplorer - explore relationships between projects in a bnd workspace " +
                 "and their corresponding projects in an eclipse workspace",
         version = "Project eXplorer 0.8",
-        subcommands = HelpCommand.class, // other subcommands are annotated methods
+        subcommands = {HelpCommand.class, ProjectExplorer.Focus.class}, // other subcommands are annotated methods
         defaultValueProvider = PropertiesDefaultProvider.class
 )
 public class ProjectExplorer {
@@ -53,6 +55,7 @@ public class ProjectExplorer {
 
     @Option(names = {"-e", "--eclipse-workspace"}, defaultValue = "../../eclipse", description = "Location of the eclipse workspace (default=.)")
     Path eclipseWorkspace;
+
     private BndCatalog catalog;
     private Set<String> knownProjects;
 
@@ -81,48 +84,85 @@ public class ProjectExplorer {
         paths.forEach(System.out::println);
     }
 
-    @Command(description = "Add specified pattern(s) to the focus list. These patterns indicate which projects you intend to edit. If no pattern is specified, just list all the existing focus projects.")
-    void focus(
-            @Parameters(paramLabel = "patterns", description = "The names (or patterns) of project(s) to be edited in eclipse.")
-            List<String> patterns) {
-        var focusList = getFocusList();
-        var matchingProjects = getMatchingProjects(focusList);
-        if (focusList.isEmpty()) {
-            System.out.println("There are no current focus projects.");
-        } else {
-            System.out.println("Current focus projects:");
-            matchingProjects
-                    .stream()
-                    .map("\t"::concat) // indent the focus list
-                    .forEach(System.out::println);
+    @Command(name = "focus", description = "Indicate which projects you intend to edit. This allows more useful analysis of dependencies.")
+    static class Focus {
+        @ParentCommand
+        ProjectExplorer px;
+
+        @Command(description = "Add the specified pattern(s) to the focus list.")
+        void add(
+                @Parameters(paramLabel = "patterns", arity = "1..*",  description = "The names (or patterns) of project(s) to be edited in eclipse.")
+                List<String> patterns
+        ) {
+            var oldFocusList = px.getFocusList();
+            // compute the new list
+            var newFocusList = new ArrayList<>(oldFocusList);
+            newFocusList.addAll(patterns);
+            // write this out to file
+            writeFocusList(newFocusList);
+            printFocusList(newFocusList);
+            summariseChanges(px.getMatchingProjects(oldFocusList), px.getMatchingProjects(newFocusList));
         }
-        if (null == patterns) return;
-        // there were some patterns, so compute the new list
-        var newFocusList = new ArrayList<>(focusList);
-        newFocusList.addAll(patterns);
-        // write this out to file
-        try (FileWriter fw = new FileWriter(getFocusListFile().toFile()); PrintWriter pw = new PrintWriter(fw)) {
-            newFocusList.forEach(pw::println);
-        } catch (IOException e) {
-            throw error("Failed to open focus file for writing");
+
+        @Command(description = "Clear the focus list completely.")
+        void clear() {
+            writeFocusList(emptyList());
+            System.out.println("Focus list cleared");
         }
-        // compute the changes
-        var newMatchingProjects = getMatchingProjects(newFocusList);
-        Set<String> added = new TreeSet<>(newMatchingProjects);
-        added.removeAll(matchingProjects);
-        Set<String> deleted = new TreeSet<>(matchingProjects);
-        deleted.removeAll(newMatchingProjects);
-        if (!added.isEmpty()) {
-            System.out.println("New focus projects:");
-            added.stream()
+
+        @Command(description = "List focus projects")
+        void list() {
+            var focusList = px.getFocusList();
+            printFocusList(focusList);
+            System.out.println("Focus projects:");
+            var projects = px.getMatchingProjects(focusList);
+            projects.stream().map("\t"::concat).forEach(System.out::println);
+        }
+
+        @Command(description = "Remove the specified pattern(s) from the focus list.")
+        void remove(
+                @Parameters(paramLabel = "patterns", arity = "1..*", description = "The names (or patterns) of project(s) no longer to be edited in eclipse.")
+                List<String> patterns
+        ) {
+            var oldFocusList = px.getFocusList();
+            // compute the new list
+            var newFocusList = new ArrayList<>(oldFocusList);
+            newFocusList.removeAll(patterns);
+            writeFocusList(newFocusList);
+            printFocusList(newFocusList);
+            summariseChanges(px.getMatchingProjects(oldFocusList), px.getMatchingProjects(newFocusList));
+        }
+
+        private void writeFocusList(List<String> newFocusList) {
+            // write this out to file
+            try (FileWriter fw = new FileWriter(px.getFocusListFile().toFile()); PrintWriter pw = new PrintWriter(fw)) {
+                newFocusList.forEach(pw::println);
+            } catch (IOException e) {
+                throw error("Failed to open focus file for writing");
+            }
+        }
+
+        private static void printFocusList(List<String> focusList) {
+            System.out.println("Focus list:");
+            focusList.stream().map("\t"::concat).forEach(System.out::println);
+            if (focusList.stream().anyMatch(s -> s.startsWith("!"))) System.out.println("N.B. When using exclusion (a pattern preceded by an exclamation mark), order is important. Inclusions and exclusions happens in list order.");
+        }
+
+        private static void summariseChanges(Set<String> before, Set<String> after) {
+            Set<String> union = new TreeSet<>(before);
+            union.addAll(after);
+            Set<String> intersection = new TreeSet<>(before);
+            intersection.retainAll(after);
+            Set<String> added = new TreeSet<>(after);
+            added.removeAll(before);
+            Set<String> deleted = new TreeSet<>(before);
+            deleted.removeAll(after);
+            System.out.println("Focused projects:");
+            union.stream()
+                    .map(p -> (added.contains(p) ? "+" : deleted.contains(p) ? "-" : " ") + p)
                     .map("\t"::concat)
                     .forEach(System.out::println);
-        }
-        if (!deleted.isEmpty()) {
-            System.out.println("Removed focus projects:");
-            deleted.stream()
-                    .map("\t"::concat)
-                    .forEach(System.out::println);
+            System.out.printf("%d added, %d removed, %d unchanged.%n", added.size(), deleted.size(), intersection.size());
         }
     }
 
