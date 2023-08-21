@@ -120,6 +120,19 @@ class BndCatalog {
         return nameIndex.get(name);
     }
 
+    Stream<Path> getLeafProjects(Collection<String> roots, Set<String> ignorables) {
+        var deps = getProjectAndDependencySubgraph(roots, false);
+        // remove the projects that are in the ignorables set
+        deps.vertexSet().stream()
+                .filter(p -> ignorables.contains(p.name))
+                .collect(Collectors.toList())
+                .forEach(deps::removeVertex);
+        // now find the leaves
+        return deps.vertexSet().stream()
+                .filter(p -> deps.outgoingEdgesOf(p).size() == 0)
+                .map(p -> p.root);
+    }
+
     Stream<Path> getRequiredProjectPaths(Collection<String> projectNames) {
         return getRequiredProjectPaths(projectNames, false);
     }

@@ -14,6 +14,7 @@
 package io.openliberty.tools.pdeps;
 
 import picocli.CommandLine;
+import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.HelpCommand;
 import picocli.CommandLine.Option;
@@ -159,22 +160,38 @@ public class ProjectExplorer {
             formatProjects(focusList).map("\t"::concat).forEach(System.out::println);
         }
 
+        static class Grouping {
+            @Option(names = {"-x", "--exhaustive"}, description = "Prints all the remaining projects to be imported. Does NOT copy anything to the clipboard.")
+            boolean exhaustive;
+            @Option(names = {"-b", "--batch"}, description = "Prints the set of projects that could each be added next.")
+            boolean batch;
+        }
+
         @Command(description = "Print the next project to add to eclipse based on the current project focus, and copy it to the clipboard.")
         void next(
-                @Option(names = {"-x", "--exhaustive"}, description = "Prints all the remaining projects to be imported. Does NOT copy anything to the clipboard.")
-                boolean exhaustive
+                @ArgGroup(exclusive = true, multiplicity = "0..1") Grouping grouping
         ) {
-            Stream<Path> allNeededProjects = getAllRequiredProjects();
-            var needed = allNeededProjects
+            var groupingOption = Optional.ofNullable(grouping);
+
+            if (groupingOption.map(g -> g.batch).orElse(false)) {
+                var projects = getKlugeProjects().collect(toSet());
+                var leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
+                if (leaves.isEmpty()) { // no kluge deps, so move onto main focus project deps
+                    projects = px.getMatchingProjects(getFocusPatterns().collect(toList()));
+                    leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
+                    if (leaves.isEmpty()) throw error("Nothing to import!");
+                }
+                leaves.forEach(System.out::println);
+                return;
+            }
+            var needed = getAllRequiredProjects()
                     .filter(p -> !px.getKnownProjects().contains(p.getFileName().toString()))
                     .map(Path::toAbsolutePath)
                     .map(Path::toString)
                     .collect(toList());
-            if (needed.isEmpty()) {
-                System.err.println("Nothing more to import!");
-                System.exit(1);
-            }
-            if (exhaustive) {
+            if (needed.isEmpty()) throw error("Nothing more to import!");
+
+            if (groupingOption.map(g -> g.exhaustive).orElse(false)) {
                 needed.forEach(System.out::println);
             } else {
                 String next = needed.get(0);
@@ -257,10 +274,7 @@ public class ProjectExplorer {
             var users = px.getBndCatalog().getDependentProjectPaths(focusProjects).map(Path::getFileName).map(Path::toString);
             var all = concat(focusProjects.stream(), users).collect(toSet());
             var mainList = px.getBndCatalog().getRequiredProjectPaths(all).collect(toList());
-            var kluges = getKlugeProjects()
-                    .map(px.getBndCatalog()::getProject)
-                    .map(Path::getFileName).map(Path::toString)
-                    .collect(toSet());
+            var kluges = getKlugeProjects().collect(toSet());
             var klugeList = px.getBndCatalog().getRequiredProjectPaths(kluges).collect(toList());
             // need to prioritise any identified kluges and their dependencies
             // and only then consider the remaining projects
@@ -270,7 +284,7 @@ public class ProjectExplorer {
 
         private Stream<String> getKlugeProjects() { return getKlugeProjects(getRawFocusList()); }
         private Stream<String> getFocusPatterns() { return getFocusPatterns(getRawFocusList()); }
-        private Stream<String> getKlugeProjects(List<String> rawFocusList) { return rawFocusList.stream().filter(this::isKluge).map(this::decodeKluge); }
+        private Stream<String> getKlugeProjects(List<String> rawFocusList) { return rawFocusList.stream().filter(this::isKluge).map(this::decodeKluge).filter(px.getBndCatalog()::hasProject); }
         private Stream<String> getFocusPatterns(List<String> rawFocusList) { return rawFocusList.stream().filter(not(this::isKluge)); }
         private String decodeKluge(String pattern) { return pattern.substring(KLUGE.length()); }
         private String encodeKluge(String project) { return KLUGE + project; }
