@@ -64,7 +64,7 @@ public class ProjectExplorer {
     List<String> finishCommand;
 
     private BndCatalog catalog;
-    private Set<String> knownProjects;
+    private Set<String> eclipseProjects;
 
     static void copyToClipboard(String text) { getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null); }
     public static void main(String...args) throws Exception {
@@ -83,10 +83,10 @@ public class ProjectExplorer {
             boolean eclipseOrdering,
             @Parameters(paramLabel = "PROJECT", arity = "1..*", description = "The project(s) whose dependencies are to be displayed.")
             List<String> projectNames) {
-        getKnownProjects();
+        getProjectsInEclipse();
         getBndCatalog();
         var paths = catalog.getRequiredProjectPaths(projectNames)
-                .filter(p -> showAll || !knownProjects.contains(p.getFileName().toString()))
+                .filter(p -> showAll || !eclipseProjects.contains(p.getFileName().toString()))
                 .map(printNames ? Path::getFileName : Path::toAbsolutePath);
         if (eclipseOrdering) paths = paths.sorted(EclipseOrdering.COMPARATOR);
         paths.forEach(System.out::println);
@@ -94,18 +94,18 @@ public class ProjectExplorer {
 
     @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
     void gaps() {
-        getKnownProjects();
+        getProjectsInEclipse();
         getBndCatalog();
-        catalog.getRequiredProjectPaths(knownProjects, true)
-                .filter(p -> !knownProjects.contains(p.getFileName().toString()))
+        catalog.getRequiredProjectPaths(eclipseProjects, true)
+                .filter(p -> !eclipseProjects.contains(p.getFileName().toString()))
                 .map(Path::toAbsolutePath)
                 .forEach(System.out::println);
     }
 
     @Command(description = "show projects already known to Eclipse")
     void known() {
-        getKnownProjects();
-        knownProjects.forEach(System.out::println);
+        getProjectsInEclipse();
+        eclipseProjects.forEach(System.out::println);
     }
 
     @Command(aliases = "ls", description = "Lists projects matching the specified patterns.")
@@ -120,9 +120,9 @@ public class ProjectExplorer {
 
     @Command(description = "show known projects that are not required by any other projects")
     void roots() {
-        getKnownProjects();
+        getProjectsInEclipse();
         getBndCatalog();
-        var graph = catalog.getProjectAndDependencySubgraph(knownProjects, true);
+        var graph = catalog.getProjectAndDependencySubgraph(eclipseProjects, true);
         graph.vertexSet().stream()
                 .filter(p -> graph.inDegreeOf(p) == 0)
                 .map(p -> p.name)
@@ -134,7 +134,7 @@ public class ProjectExplorer {
             @Parameters(arity = "1..*", description = "The project(s) whose dependents are to be displayed.")
                     List<String> projectNames
     ) {
-        getKnownProjects();
+        getProjectsInEclipse();
         getBndCatalog().getDependentProjectPaths(projectNames)
                 .map(Path::getFileName)
                 .forEach(System.out::println);
@@ -155,11 +155,11 @@ public class ProjectExplorer {
         return this.catalog;
     }
 
-    Set<String> getKnownProjects() {
-        if (this.knownProjects == null) {
+    Set<String> getProjectsInEclipse() {
+        if (this.eclipseProjects == null) {
             Path dotProjectsDir = getEclipseDotProjectsDir();
             try {
-                this.knownProjects = unmodifiableSet(Files.list(dotProjectsDir)
+                this.eclipseProjects = unmodifiableSet(Files.list(dotProjectsDir)
                         .filter(Files::isDirectory)
                         .map(Path::getFileName)
                         .map(Path::toString)
@@ -169,8 +169,10 @@ public class ProjectExplorer {
                         "Exception was " + e);
             }
         }
-        return this.knownProjects;
+        return this.eclipseProjects;
     }
+
+    void notifyEclipseUpdated() { this.eclipseProjects = null; }
 
     Set<String> getMatchingProjects(List<String> patterns) {
         Set<String> set = new TreeSet<>();

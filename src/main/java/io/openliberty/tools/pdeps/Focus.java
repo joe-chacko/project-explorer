@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.TreeSet;
@@ -58,7 +57,7 @@ class Focus {
             static class Waiter {
                 @CommandLine.Option(names = {"-d", "--delay"}, required = true, paramLabel = "WAIT IN MILLISECONDS",
                         description = "How long to wait (in milliseconds) after invoking eclipse command. If not specified, wait for ")
-                Optional<Integer> delay;
+                Integer delay;
                 @CommandLine.Option(names = {"-p", "--pause"}, required = true)
                 boolean pause;
             }
@@ -67,43 +66,60 @@ class Focus {
             boolean auto;
             @CommandLine.ArgGroup(exclusive = true, multiplicity = "0..1")
             MultiAction.Auto.Waiter wait;
+
+            @CommandLine.Option(names = {"-i", "--iterate"}, required = false, description = "Wait for press of enter key, then import next batch and repeat.")
+            boolean iterate;
         }
 
         @CommandLine.ArgGroup(exclusive = false, multiplicity = "1")
         MultiAction.Auto auto;
-        @CommandLine.Option(names = {"-c", "--copy"}, required = true)
+        @CommandLine.Option(names = {"-c", "--copy"}, required = true, description = "Copy paths to clipboard one at a time.")
         boolean copy;
+
+        void waitOrPause() {
+            if (auto != null && auto.wait != null && auto.wait.delay != null)
+                try {
+                    Thread.sleep(auto.wait.delay);
+                } catch (InterruptedException ignored) {
+                }
+            if (auto != null && auto.wait != null && auto.wait.pause)
+                pause();
+            if (copy) pause();
+        }
     }
 
-    @CommandLine.Command(description = "Work with next tranche of projects whose dependencies are satisfied.")
+    @CommandLine.Command(description = "Work with the set of projects whose dependencies are satisfied.")
     void batch(
             @CommandLine.ArgGroup(exclusive = true, multiplicity = "0..1")
             MultiAction action
     ) {
         var leaves = getLeafDependencies().collect(toCollection(LinkedList::new));
-        // set up the action for each leaf
-        Consumer<String> print = System.out::println;
-        Consumer<String> exec = null == action ? print : print.andThen(action.copy ? ProjectExplorer::copyToClipboard : px::invokeEclipse);
+        for (;;) {
+            // set up the action for each leaf
+            Consumer<String> print = System.out::println;
+            Consumer<String> exec = null == action ? print : print.andThen(action.copy ? ProjectExplorer::copyToClipboard : px::invokeEclipse);
 
-        var first = leaves.pollFirst();
-        exec.accept(first);
+            var first = leaves.pollFirst();
+            exec.accept(first);
 
-        leaves.forEach(leaf -> {
-            // perform the wait, if specified
-            Optional.ofNullable(action).map(a -> a.auto).map(a -> a.wait).flatMap(w -> w.delay).ifPresent(t -> {
-                try {
-                    Thread.sleep(t);
-                } catch (InterruptedException e) {
-                }
+            leaves.forEach(leaf -> {
+                // perform the wait, if specified
+                if (action != null) action.waitOrPause();
+                // process the next project
+                exec.accept(leaf);
             });
-            Optional.ofNullable(action).map(a -> a.auto).map(a -> a.wait).filter(w -> w.pause).ifPresent(w -> {
-                System.out.println("Press return to continue");
-                new Scanner(System.in).nextLine();
-            });
-            // process the next project
-            exec.accept(leaf);
-        });
+            if (null == action || null == action.auto || !action.auto.iterate) return;
+            // force recalculation of leaves
+            px.notifyEclipseUpdated();
+            leaves = getLeafDependencies(true).collect(toCollection(LinkedList::new));
+            if (leaves.isEmpty()) {
+                System.out.println("Finished! =D");
+                return;
+            }
+            pause();
+        }
     }
+
 
     @CommandLine.Command(description = "Clear the focus list completely.")
     void clear() {
@@ -117,7 +133,7 @@ class Focus {
             boolean count
     ) {
         var paths = getAllRequiredProjects()
-                .filter(p -> !px.getKnownProjects().contains(p.getFileName().toString()));
+                .filter(p -> !px.getProjectsInEclipse().contains(p.getFileName().toString()));
         if (count) System.out.println(paths.count());
         else paths
                 .map(Path::toAbsolutePath)
@@ -193,12 +209,16 @@ class Focus {
 
     }
 
-    private Stream<String> getLeafDependencies() {
+    private Stream<String> getLeafDependencies() { return getLeafDependencies(false); }
+
+    private Stream<String> getLeafDependencies(boolean allowEmpty) {
         var projects = getKlugeProjects().collect(toSet());
-        var leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
+        var leaves = px.getBndCatalog().getLeafProjects(projects, px.getProjectsInEclipse()).collect(toList());
+        OUTER_HERE:
         if (leaves.isEmpty()) { // no kluge deps, so move onto remaining deps
             projects = getAllRequiredProjects().map(Path::getFileName).map(Path::toString).collect(toSet());
-            leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
+            leaves = px.getBndCatalog().getLeafProjects(projects, px.getProjectsInEclipse()).collect(toList());
+            if (allowEmpty) break OUTER_HERE;
             if (leaves.isEmpty()) throw error("Nothing to import!");
         }
         return leaves.stream().map(Path::toAbsolutePath).map(Path::toString);
@@ -208,7 +228,7 @@ class Focus {
     @CommandLine.Command(description = "Identify orphaned projects in eclipse not needed for editing the current focus projects")
     void orphans() {
         var required = getAllRequiredProjects().map(Path::getFileName).map(Path::toString).collect(toSet());
-        var known = new TreeSet<>(px.getKnownProjects());
+        var known = new TreeSet<>(px.getProjectsInEclipse());
         known.removeAll(required);
         System.out.println("The following projects are no longer required for the current focus:");
         known.stream().map("\t"::concat).forEach(System.out::println);
@@ -329,4 +349,8 @@ class Focus {
         return verifyOrCreateFile("focus list file", px.getEclipsePxDir().resolve("focus-list"));
     }
 
+    private static void pause() {
+        System.out.println("Press return to continue");
+        new Scanner(System.in).nextLine();
+    }
 }
