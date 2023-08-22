@@ -31,17 +31,22 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Scanner;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static java.awt.Toolkit.getDefaultToolkit;
+import static java.util.Arrays.asList;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableSet;
 import static java.util.function.Predicate.not;
+import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toCollection;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
@@ -57,16 +62,23 @@ import static java.util.stream.Stream.concat;
         defaultValueProvider = PropertiesDefaultProvider.class
 )
 public class ProjectExplorer {
-    @Option(names = {"-b", "--bnd-workspace"}, defaultValue = ".", description = "Location of the bnd workspace (default=.)")
+    @Option(names = {"-b", "--bnd-workspace"}, defaultValue = ".", description = "Location of the bnd workspace")
     Path bndWorkspace;
 
-    @Option(names = {"-e", "--eclipse-workspace"}, defaultValue = "../../eclipse", description = "Location of the eclipse workspace (default=.)")
+    @Option(names = {"-c", "--eclipse--command"}, split="\n", splitSynopsisLabel = "\\n", description = "Command to open a directory for import into eclipse")
+    List<String> eclipseCommand;
+
+    @Option(names = {"-e", "--eclipse-workspace"}, defaultValue = "../../eclipse", description = "Location of the eclipse workspace")
     Path eclipseWorkspace;
+
+    @Option(names = {"-f", "--finish-command"}, split="\n", splitSynopsisLabel = "\\n", description = "Command to press finish on eclipse's import dialog")
+    List<String> finishCommand;
 
     private BndCatalog catalog;
     private Set<String> knownProjects;
 
-    public static void main(String...args) {
+    static void copyToClipboard(String text) { getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null); }
+    public static void main(String...args) throws Exception {
         System.exit(new CommandLine(new ProjectExplorer())
                 .setAbbreviatedSubcommandsAllowed(true)
                 .execute(args));
@@ -80,7 +92,7 @@ public class ProjectExplorer {
             boolean printNames,
             @Option(names = {"-e", "--eclipse-ordering"}, description = "Use the unusual ordering of projects in eclipse's import-existing-projects dialog box.")
             boolean eclipseOrdering,
-            @Parameters(paramLabel = "project", arity = "1..*", description = "The project(s) whose dependencies are to be displayed.")
+            @Parameters(paramLabel = "PROJECT", arity = "1..*", description = "The project(s) whose dependencies are to be displayed.")
             List<String> projectNames) {
         getKnownProjects();
         getBndCatalog();
@@ -97,13 +109,13 @@ public class ProjectExplorer {
             subcommands = HelpCommand.class
     )
     static class Focus {
-        public static final String KLUGE = "kluge:";
+
+        static final String KLUGE = "kluge:";
         @ParentCommand
         ProjectExplorer px;
-
         @Command(description = "Add the specified pattern(s) to the focus list.")
         void add(
-                @Parameters(paramLabel = "patterns", arity = "1..*",  description = "The names (or patterns) of project(s) to be edited in eclipse.")
+                @Parameters(paramLabel = "PATTERN", arity = "1..*",  description = "The names (or patterns) of project(s) to be edited in eclipse.")
                 List<String> patterns
         ) {
             var oldFocusList = getRawFocusList();
@@ -116,15 +128,74 @@ public class ProjectExplorer {
             summariseChanges(oldFocusList, newFocusList);
         }
 
+        static class MultiAction {
+            static class Auto {
+                static class Waiter {
+                    @Option(names = {"-d", "--delay"}, required = true, paramLabel = "WAIT IN MILLISECONDS",
+                            description = "How long to wait (in milliseconds) after invoking eclipse command. If not specified, wait for ")
+                    Optional<Integer> delay;
+                    @Option(names = {"-p", "--pause"}, required = true)
+                    boolean pause;
+                }
+                @Option(names = {"-a", "--auto"}, required = true)
+                boolean auto;
+                @ArgGroup(exclusive = true, multiplicity = "0..1")
+                Waiter wait;
+            }
+            @ArgGroup(exclusive = false, multiplicity = "1")
+            Auto auto;
+            @Option(names = {"-c", "--copy"}, required = true)
+            boolean copy;
+        }
+
+        @Command(description = "Work with next tranche of projects whose dependencies are satisfied.")
+        void batch(
+                @ArgGroup(exclusive = true, multiplicity = "0..1")
+                MultiAction action
+        ) {
+            var leaves = getLeafDependencies().collect(toCollection(LinkedList::new));
+            // set up the action for each leaf
+            Consumer<String> print = System.out::println;
+            Consumer<String> exec = null == action ? print : print.andThen(action.copy ? ProjectExplorer::copyToClipboard : px::invokeEclipse);
+
+            var first = leaves.pollFirst();
+            exec.accept(first);
+
+            leaves.forEach(leaf -> {
+                // perform the wait, if specified
+                Optional.ofNullable(action).map(a -> a.auto).map(a -> a.wait).flatMap(w -> w.delay).ifPresent(t -> {try {Thread.sleep(t);} catch (InterruptedException e) {}});
+                Optional.ofNullable(action).map(a -> a.auto).map(a -> a.wait).filter(w -> w.pause).ifPresent(w -> {
+                    System.out.println("Press return to continue");
+                    new Scanner(System.in).nextLine();
+                });
+                // process the next project
+                exec.accept(leaf);
+            });
+        }
+
         @Command(description = "Clear the focus list completely.")
         void clear() {
             writeFocusList(emptyList());
             System.out.println("Focus list cleared");
         }
 
-        @Command(aliases = "remove", description = "Remove the specified pattern(s) from the focus list.")
-        void delete(
-                @Parameters(paramLabel = "patterns", arity = "1..*", description = "The names (or patterns) of project(s) no longer to be edited in eclipse.")
+        @Command(description = "Print all missing dependencies for current focus.")
+        void deps(
+                @Option(names = {"-c", "--count"}, description = "Show a count of the remaining dependencies")
+                boolean count
+        ) {
+            var paths = getAllRequiredProjects()
+                    .filter(p -> !px.getKnownProjects().contains(p.getFileName().toString()));
+            if (count) System.out.println(paths.count());
+            else paths
+                    .map(Path::toAbsolutePath)
+                    .map(Path::toString)
+                    .forEach(System.out::println);
+        }
+
+        @Command(description = "Remove the specified pattern(s) from the focus list.")
+        void remove(
+                @Parameters(paramLabel = "PATTERN", arity = "1..*", description = "The names (or patterns) of project(s) no longer to be edited in eclipse.")
                 List<String> patterns
         ) {
             var oldFocusList = getRawFocusList();
@@ -136,9 +207,11 @@ public class ProjectExplorer {
             summariseChanges(oldFocusList, newFocusList);
         }
 
-        @Command(aliases={"kludge"}, description = "Adds the specified project as a kluge for undetected dependencies that show up as errors in eclipse. This will NOT pull in the users of this project.")
+        @Command(aliases={"kludge"}, description = {
+                "Add a focus project to resolve errors in eclipse.",
+                "The specified project and its dependencies will be prioritised over other focus projects. This will NOT pull in the users of this project."})
         void kluge(
-                @Parameters(description = "The name of a project to add")
+                @Parameters(paramLabel = "PROJECT", description = "The name of a project to add")
                 String project
         ) {
             if (!px.getBndCatalog().hasProject(project)) throw error("Unable to find project: " + project);
@@ -160,45 +233,44 @@ public class ProjectExplorer {
             formatProjects(focusList).map("\t"::concat).forEach(System.out::println);
         }
 
-        static class Grouping {
-            @Option(names = {"-x", "--exhaustive"}, description = "Prints all the remaining projects to be imported. Does NOT copy anything to the clipboard.")
-            boolean exhaustive;
-            @Option(names = {"-b", "--batch"}, description = "Prints the set of projects that could each be added next.")
-            boolean batch;
+        static class SingleAction {
+            @Option(names = {"-a", "--auto"}, required = true)
+            boolean auto;
+            @Option(names = {"-c", "--copy"}, required = true)
+            boolean copy;
         }
-
-        @Command(description = "Print the next project to add to eclipse based on the current project focus, and copy it to the clipboard.")
+        @Command(
+                description = "Print the next project to add to eclipse based on the current project focus, and copy it to the clipboard.",
+                defaultValueProvider = PropertiesDefaultProvider.class
+        )
+        // next (prints one project)
+        // next (--copy|--auto) (prints one project and copies to clipboard)
+        // next --auto (requires eclipse-command, uses finish-command if supplied, prints one project, imports into eclipse, optionally clicks finish)
+        // batch (prints set of projects with satisfied dependencies)
+        // batch --copy (prints one project at a time, copies to clipboard, waits for enter key)
+        // batch (--copy|--auto [--delay <time in ms> | --pause]) (prints one project at a time, imports into eclipse, optionally clicks finish, waits for time or enter key as specified)
         void next(
-                @ArgGroup(exclusive = true, multiplicity = "0..1") Grouping grouping
+                @ArgGroup(exclusive = true, multiplicity = "0..1") SingleAction action
         ) {
-            var groupingOption = Optional.ofNullable(grouping);
+            var next = getLeafDependencies().findFirst().get();
+            System.out.println(next);
+            if (null == action) return;
+            if (action.copy) copyToClipboard(next);
+            if (action.auto) px.invokeEclipse(next);
 
-            if (groupingOption.map(g -> g.batch).orElse(false)) {
-                var projects = getKlugeProjects().collect(toSet());
-                var leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
-                if (leaves.isEmpty()) { // no kluge deps, so move onto main focus project deps
-                    projects = px.getMatchingProjects(getFocusPatterns().collect(toList()));
-                    leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
-                    if (leaves.isEmpty()) throw error("Nothing to import!");
-                }
-                leaves.forEach(System.out::println);
-                return;
-            }
-            var needed = getAllRequiredProjects()
-                    .filter(p -> !px.getKnownProjects().contains(p.getFileName().toString()))
-                    .map(Path::toAbsolutePath)
-                    .map(Path::toString)
-                    .collect(toList());
-            if (needed.isEmpty()) throw error("Nothing more to import!");
-
-            if (groupingOption.map(g -> g.exhaustive).orElse(false)) {
-                needed.forEach(System.out::println);
-            } else {
-                String next = needed.get(0);
-                System.out.printf("%s (%d more to go)%n", next, needed.size() - 1);
-                getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(next), null);
-            }
         }
+
+        private Stream<String> getLeafDependencies() {
+            var projects = getKlugeProjects().collect(toSet());
+            var leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
+            if (leaves.isEmpty()) { // no kluge deps, so move onto remaining deps
+                projects = getAllRequiredProjects().map(Path::getFileName).map(Path::toString).collect(toSet());
+                leaves = px.getBndCatalog().getLeafProjects(projects, px.getKnownProjects()).collect(toList());
+                if (leaves.isEmpty()) throw error("Nothing to import!");
+            }
+            return leaves.stream().map(Path::toAbsolutePath).map(Path::toString);
+        }
+
 
         @Command(description = "Identify orphaned projects in eclipse not needed for editing the current focus projects")
         void orphans() {
@@ -283,6 +355,7 @@ public class ProjectExplorer {
         }
 
         private Stream<String> getKlugeProjects() { return getKlugeProjects(getRawFocusList()); }
+
         private Stream<String> getFocusPatterns() { return getFocusPatterns(getRawFocusList()); }
         private Stream<String> getKlugeProjects(List<String> rawFocusList) { return rawFocusList.stream().filter(this::isKluge).map(this::decodeKluge).filter(px.getBndCatalog()::hasProject); }
         private Stream<String> getFocusPatterns(List<String> rawFocusList) { return rawFocusList.stream().filter(not(this::isKluge)); }
@@ -296,10 +369,9 @@ public class ProjectExplorer {
                 throw error("Could not open the focus file for reading");
             }
         }
-
         private Path getFocusListFile() { return verifyOrCreateFile("focus list file", px.getEclipsePxDir().resolve("focus-list")); }
-    }
 
+    }
     @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
     void gaps() {
         getKnownProjects();
@@ -403,8 +475,32 @@ public class ProjectExplorer {
     }
 
     private Path getEclipseDotProjectsDir() { return verifyDir(".projects dir", getEclipseWorkspace().resolve(".metadata/.plugins/org.eclipse.core.resources/.projects")); }
+
     private Path getEclipsePxDir() { return verifyOrCreateDir("eclipse px settings dir", getEclipseWorkspace().resolve(".px")); }
     private Path getEclipseWorkspace() { return verifyDir("eclipse workspace", eclipseWorkspace); }
+    void invokeEclipse(String path) {
+        // invoke eclipse
+        run(requireEclipseCommand(), path);
+        // optionally click finish
+        Optional.ofNullable(getFinishCommand()).filter(not(List::isEmpty)).ifPresent(ProjectExplorer::run);
+    }
+
+    private static boolean isMacOS() { return "Mac OS X".equals(System.getProperty("os.name")); }
+    private static void run(List<String> cmd, String...extraArgs) {
+        Stream.of(extraArgs).forEach(cmd::add);
+        try {
+            new ProcessBuilder(cmd).inheritIO().start().waitFor();
+        } catch (IOException e) {
+            error("Error invoking command " + cmd.stream().collect(joining("' '", "'", "'")) + e.getMessage());
+        } catch (InterruptedException e) {
+            error("Interrupted waiting for command " + cmd.stream().collect(joining("' '", "'", "'")) + e.getMessage());
+        }
+    }
+    private List<String> requireEclipseCommand() { return Optional.ofNullable(getEclipseCommand()).orElseThrow(() -> error("Must specify eclipse command in order to automate eclipse actions.")); }
+    private List<String> getEclipseCommand() { return null != eclipseCommand ? eclipseCommand : defaultEclipseCommand(); }
+    private List<String> defaultEclipseCommand() { return isMacOS() ? new ArrayList(asList("open -a Eclipse".split(" "))) : null; }
+    private List<String> getFinishCommand() { return  null != finishCommand ? finishCommand : defaultFinishCommand(); }
+    private List<String> defaultFinishCommand() { return isMacOS() ? asList("osascript", "-e", "tell app \"System Events\" to tell process \"Eclipse\" to click button \"Finish\" of window 1") : null; }
 
     private static Path verifyOrCreateFile(String desc, Path file) {
         if (Files.exists(file) && !Files.isDirectory(file) && Files.isWritable(file)) return file;
