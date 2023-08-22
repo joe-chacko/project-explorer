@@ -65,7 +65,7 @@ public class ProjectExplorer {
     @Option(names = {"-b", "--bnd-workspace"}, defaultValue = ".", description = "Location of the bnd workspace")
     Path bndWorkspace;
 
-    @Option(names = {"-c", "--eclipse--command"}, split="\n", splitSynopsisLabel = "\\n", description = "Command to open a directory for import into eclipse")
+    @Option(names = {"-c", "--eclipse-command"}, split="\n", splitSynopsisLabel = "\\n", description = "Command to open a directory for import into eclipse")
     List<String> eclipseCommand;
 
     @Option(names = {"-e", "--eclipse-workspace"}, defaultValue = "../../eclipse", description = "Location of the eclipse workspace")
