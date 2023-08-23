@@ -162,6 +162,7 @@ public class ProjectExplorer {
                     .filter(Files::isDirectory)
                     .map(Path::getFileName)
                     .map(Path::toString)
+                    .filter(not(s -> s.startsWith(".")))
                     .collect(toSet());
         } catch (IOException e) {
             throw error("Could not enumerate Eclipse projects despite finding metadata location: " + dotProjectsDir,
