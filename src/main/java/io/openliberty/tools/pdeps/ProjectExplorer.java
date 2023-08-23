@@ -31,6 +31,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static java.awt.Toolkit.getDefaultToolkit;
@@ -63,8 +64,10 @@ public class ProjectExplorer {
     @Option(names = {"-f", "--finish-command"}, split="\n", splitSynopsisLabel = "\\n", description = "Command to press finish on eclipse's import dialog")
     List<String> finishCommand;
 
+    @Option(names = {"-q", "--quiet"}, description = "Suppress extraneous information. Might be useful when using in a script.")
+    boolean quiet;
+
     private BndCatalog catalog;
-    private Set<String> eclipseProjects;
 
     static void copyToClipboard(String text) { getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null); }
     public static void main(String...args) throws Exception {
@@ -83,7 +86,7 @@ public class ProjectExplorer {
             boolean eclipseOrdering,
             @Parameters(paramLabel = "PROJECT", arity = "1..*", description = "The project(s) whose dependencies are to be displayed.")
             List<String> projectNames) {
-        getProjectsInEclipse();
+        var eclipseProjects = getProjectsInEclipse();
         getBndCatalog();
         var paths = catalog.getRequiredProjectPaths(projectNames)
                 .filter(p -> showAll || !eclipseProjects.contains(p.getFileName().toString()))
@@ -94,7 +97,7 @@ public class ProjectExplorer {
 
     @Command(description = "Lists projects needed by but missing from Eclipse. Full paths are displayed, for ease of pasting into Eclipse's Import Project... dialog. ")
     void gaps() {
-        getProjectsInEclipse();
+        var eclipseProjects = getProjectsInEclipse();
         getBndCatalog();
         catalog.getRequiredProjectPaths(eclipseProjects, true)
                 .filter(p -> !eclipseProjects.contains(p.getFileName().toString()))
@@ -103,10 +106,7 @@ public class ProjectExplorer {
     }
 
     @Command(description = "show projects already known to Eclipse")
-    void known() {
-        getProjectsInEclipse();
-        eclipseProjects.forEach(System.out::println);
-    }
+    void known() { getProjectsInEclipse().forEach(System.out::println); }
 
     @Command(aliases = "ls", description = "Lists projects matching the specified patterns.")
     void list(@Parameters(paramLabel = "pattern", arity = "0..*", description = "The patterns to match using filesystem globbing")
@@ -120,7 +120,7 @@ public class ProjectExplorer {
 
     @Command(description = "show known projects that are not required by any other projects")
     void roots() {
-        getProjectsInEclipse();
+        var eclipseProjects = getProjectsInEclipse();
         getBndCatalog();
         var graph = catalog.getProjectAndDependencySubgraph(eclipseProjects, true);
         graph.vertexSet().stream()
@@ -156,23 +156,18 @@ public class ProjectExplorer {
     }
 
     Set<String> getProjectsInEclipse() {
-        if (this.eclipseProjects == null) {
-            Path dotProjectsDir = getEclipseDotProjectsDir();
-            try {
-                this.eclipseProjects = unmodifiableSet(Files.list(dotProjectsDir)
-                        .filter(Files::isDirectory)
-                        .map(Path::getFileName)
-                        .map(Path::toString)
-                        .collect(toSet()));
-            } catch (IOException e) {
-                throw error("Could not enumerate Eclipse projects despite finding metadata location: " + dotProjectsDir,
-                        "Exception was " + e);
-            }
+        Path dotProjectsDir = getEclipseDotProjectsDir();
+        try {
+            return Files.list(dotProjectsDir)
+                    .filter(Files::isDirectory)
+                    .map(Path::getFileName)
+                    .map(Path::toString)
+                    .collect(toSet());
+        } catch (IOException e) {
+            throw error("Could not enumerate Eclipse projects despite finding metadata location: " + dotProjectsDir,
+                    "Exception was " + e);
         }
-        return this.eclipseProjects;
     }
-
-    void notifyEclipseUpdated() { this.eclipseProjects = null; }
 
     Set<String> getMatchingProjects(List<String> patterns) {
         Set<String> set = new TreeSet<>();
@@ -254,6 +249,9 @@ public class ProjectExplorer {
         System.exit(1);
         throw new Error();
     }
+
+    void info(String msg, Object...inserts) { if (!quiet) System.out.println(String.format(msg, inserts)); }
+    void info(Supplier<String> msg) { if (!quiet) System.out.println(msg.get()); }
 
     enum EclipseOrdering implements Comparator<Path> {
         COMPARATOR;
