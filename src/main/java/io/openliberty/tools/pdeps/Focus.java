@@ -62,7 +62,7 @@ class Focus {
                 boolean pause;
             }
 
-            @CommandLine.Option(names = {"-a", "--auto"}, required = true)
+            @CommandLine.Option(names = {"-a", "--auto"}, required = true, description = "Automatically imports next batch of projects into Eclipse")
             boolean auto;
             @CommandLine.ArgGroup(exclusive = true, multiplicity = "0..1")
             MultiAction.Auto.Waiter wait;
@@ -108,9 +108,8 @@ class Focus {
                 // process the next project
                 exec.accept(leaf);
             });
+            printProjectsRemaining();
             if (null == action || null == action.auto || !action.auto.iterate) return;
-            // force recalculation of leaves
-            px.notifyEclipseUpdated();
             leaves = getLeafDependencies(true).collect(toCollection(LinkedList::new));
             if (leaves.isEmpty()) {
                 System.out.println("Finished! =D");
@@ -203,10 +202,11 @@ class Focus {
     ) {
         var next = getLeafDependencies().findFirst().get();
         System.out.println(next);
-        if (null == action) return;
-        if (action.copy) ProjectExplorer.copyToClipboard(next);
-        if (action.auto) px.invokeEclipse(next);
-
+        if (null != action) {
+            if (action.copy) ProjectExplorer.copyToClipboard(next);
+            if (action.auto) px.invokeEclipse(next);
+        }
+        printProjectsRemaining();
     }
 
     private Stream<String> getLeafDependencies() { return getLeafDependencies(false); }
@@ -352,5 +352,13 @@ class Focus {
     private static void pause() {
         System.out.println("Press return to continue");
         new Scanner(System.in).nextLine();
+    }
+
+    private void printProjectsRemaining() {
+        px.notifyEclipseUpdated();
+        int count = (int) getAllRequiredProjects()
+                .filter(p -> !px.getProjectsInEclipse().contains(p.getFileName().toString()))
+                .count();
+        System.out.println("Total projects remaining to import = " + count);
     }
 }
