@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
@@ -267,20 +268,32 @@ class Focus {
 
     @CommandLine.Command(aliases = {"unkludge"}, description = "Removes the specified project from the list of kluges.")
     void unkluge(
-            @Parameters(description = "The name of a project to remove")
-            String project
+            @Parameters(paramLabel = "PROJECT", arity = "1..*", description = "The name (or pattern) of a project to remove")
+            List<String> patterns
     ) {
-        var klugeProject = KLUGE + project;
         var oldFocusList = getRawFocusList();
-        if (!oldFocusList.contains(klugeProject))
-            throw error("Unable to find kluge in list: " + project);
-        // compute the new list
         var newFocusList = new ArrayList<>(oldFocusList);
-        newFocusList.remove(encodeKluge(project));
-        // write this out to file
+        List<String> failures = new ArrayList<>();
+        for(String pattern: patterns) {
+            try {
+                var kluges = px.getBndCatalog().findProjects(pattern) // throws NoSuchElement if pattern not found
+                        .map(this::encodeKluge)
+                        .filter(oldFocusList::contains)
+                        .collect(toList());
+                if (kluges.isEmpty()) throw new NoSuchElementException();
+                kluges.stream()
+                        .filter(newFocusList::remove)
+                        .map(this::decodeKluge)
+                        .map(k -> "Removed kluge: " + k)
+                        .forEach(px::info);
+            } catch (NoSuchElementException e) {
+                failures.add(pattern);
+            }
+        }
+
         writeFocusList(newFocusList);
-        printFocusList(newFocusList);
-        summariseChanges(oldFocusList, newFocusList);
+        if (failures.isEmpty()) return;
+        throw error("Unable to find kluges matching these patterns: " + String.join(", ", failures));
     }
 
     private void writeFocusList(List<String> newFocusList) {
@@ -355,21 +368,12 @@ class Focus {
         return rawFocusList.stream().filter(this::isKluge).map(this::decodeKluge).filter(px.getBndCatalog()::hasProject);
     }
 
-    private Stream<String> getFocusPatterns(List<String> rawFocusList) {
-        return rawFocusList.stream().filter(not(this::isKluge));
-    }
+    private Stream<String> getFocusPatterns(List<String> rawFocusList) { return rawFocusList.stream().filter(not(this::isKluge)); }
 
-    private String decodeKluge(String pattern) {
-        return pattern.substring(KLUGE.length());
-    }
-
-    private String encodeKluge(String project) {
-        return KLUGE + project;
-    }
-
-    private boolean isKluge(String pattern) {
-        return pattern.startsWith(KLUGE);
-    }
+    private String decodeKluge(String pattern) { return pattern.substring(KLUGE.length()); }
+    private String encodeKluge(String project) { return KLUGE + project; }
+    private String encodeKluge(Path project) { return KLUGE + project.getFileName().toString(); }
+    private boolean isKluge(String pattern) { return pattern.startsWith(KLUGE); }
 
     private List<String> getRawFocusList() {
         try {
