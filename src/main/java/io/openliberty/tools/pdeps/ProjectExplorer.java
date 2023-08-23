@@ -195,6 +195,7 @@ public class ProjectExplorer {
 
     Path getEclipsePxDir() { return verifyOrCreateDir("eclipse px settings dir", getEclipseWorkspace().resolve(".px")); }
     private Path getEclipseWorkspace() { return verifyDir("eclipse workspace", eclipseWorkspace); }
+    void invokeEclipse(Path path) { invokeEclipse(path.toString()); }
     void invokeEclipse(String path) {
         // invoke eclipse
         run(requireEclipseCommand(), path);
@@ -241,6 +242,11 @@ public class ProjectExplorer {
     private static Path verifyDir(String desc, Path dir) {
         if (Files.isDirectory(dir)) return dir;
         throw error("Could not locate " + desc + ": " + dir);
+    }
+
+    static void warn(String message, String... details) {
+        System.err.println("WARNING: " + message);
+        for (String detail: details) System.err.println(detail);
     }
 
     static Error error(String message, String... details) {

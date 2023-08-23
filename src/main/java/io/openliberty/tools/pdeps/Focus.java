@@ -1,6 +1,8 @@
 package io.openliberty.tools.pdeps;
 
 import picocli.CommandLine;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
 
 import java.io.FileWriter;
 import java.io.IOException;
@@ -19,6 +21,7 @@ import java.util.stream.Stream;
 
 import static io.openliberty.tools.pdeps.ProjectExplorer.error;
 import static io.openliberty.tools.pdeps.ProjectExplorer.verifyOrCreateFile;
+import static io.openliberty.tools.pdeps.ProjectExplorer.warn;
 import static java.util.Collections.emptyList;
 import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toCollection;
@@ -39,7 +42,7 @@ class Focus {
 
     @CommandLine.Command(description = "Add the specified pattern(s) to the focus list.")
     void add(
-            @CommandLine.Parameters(paramLabel = "PATTERN", arity = "1..*", description = "The names (or patterns) of project(s) to be edited in eclipse.")
+            @Parameters(paramLabel = "PATTERN", arity = "1..*", description = "The names (or patterns) of project(s) to be edited in eclipse.")
             List<String> patterns
     ) {
         var oldFocusList = getRawFocusList();
@@ -55,25 +58,25 @@ class Focus {
     static class MultiAction {
         static class Auto {
             static class Waiter {
-                @CommandLine.Option(names = {"-d", "--delay"}, required = true, paramLabel = "WAIT IN MILLISECONDS",
+                @Option(names = {"-d", "--delay"}, required = true, paramLabel = "WAIT IN MILLISECONDS",
                         description = "How long to wait (in milliseconds) after invoking eclipse command. If not specified, wait for ")
                 Integer delay;
-                @CommandLine.Option(names = {"-p", "--pause"}, required = true)
+                @Option(names = {"-p", "--pause"}, required = true)
                 boolean pause;
             }
 
-            @CommandLine.Option(names = {"-a", "--auto"}, required = true, description = "Automatically imports next batch of projects into Eclipse")
+            @Option(names = {"-a", "--auto"}, required = true, description = "Automatically imports next batch of projects into Eclipse")
             boolean auto;
             @CommandLine.ArgGroup(exclusive = true, multiplicity = "0..1")
             MultiAction.Auto.Waiter wait;
 
-            @CommandLine.Option(names = {"-i", "--iterate"}, required = false, description = "Wait for press of enter key, then import next batch and repeat.")
+            @Option(names = {"-i", "--iterate"}, required = false, description = "Wait for press of enter key, then import next batch and repeat.")
             boolean iterate;
         }
 
         @CommandLine.ArgGroup(exclusive = false, multiplicity = "1")
         MultiAction.Auto auto;
-        @CommandLine.Option(names = {"-c", "--copy"}, required = true, description = "Copy paths to clipboard one at a time.")
+        @Option(names = {"-c", "--copy"}, required = true, description = "Copy paths to clipboard one at a time.")
         boolean copy;
 
         void waitOrPause() {
@@ -120,7 +123,6 @@ class Focus {
         }
     }
 
-
     @CommandLine.Command(description = "Clear the focus list completely.")
     void clear() {
         writeFocusList(emptyList());
@@ -129,7 +131,7 @@ class Focus {
 
     @CommandLine.Command(description = "Print all missing dependencies for current focus.")
     void deps(
-            @CommandLine.Option(names = {"-c", "--count"}, description = "Show a count of the remaining dependencies")
+            @Option(names = {"-c", "--count"}, description = "Show a count of the remaining dependencies")
             boolean count
     ) {
         var paths = getRemainingDependencies();
@@ -142,7 +144,7 @@ class Focus {
 
     @CommandLine.Command(description = "Remove the specified pattern(s) from the focus list.")
     void remove(
-            @CommandLine.Parameters(paramLabel = "PATTERN", arity = "1..*", description = "The names (or patterns) of project(s) no longer to be edited in eclipse.")
+            @Parameters(paramLabel = "PATTERN", arity = "1..*", description = "The names (or patterns) of project(s) no longer to be edited in eclipse.")
             List<String> patterns
     ) {
         var oldFocusList = getRawFocusList();
@@ -158,18 +160,47 @@ class Focus {
             "Add a focus project to resolve errors in eclipse.",
             "The specified project and its dependencies will be prioritised over other focus projects. This will NOT pull in the users of this project."})
     void kluge(
-            @CommandLine.Parameters(paramLabel = "PROJECT", description = "The name of a project to add")
-            String project
+            @Option(names = {"-f", "--force"})
+            boolean installImmediately,
+            @Parameters(paramLabel = "PROJECT", arity = "1..*", description = "The name of a project to add")
+            List<String> kluges
     ) {
-        if (!px.getBndCatalog().hasProject(project)) throw error("Unable to find project: " + project);
-        var oldFocusList = getRawFocusList();
-        // compute the new list
-        var newFocusList = new ArrayList<>(oldFocusList);
-        newFocusList.add(encodeKluge(project));
-        // write this out to file
-        writeFocusList(newFocusList);
-        printFocusList(newFocusList);
-        summariseChanges(oldFocusList, newFocusList);
+        List<String> failures = new ArrayList<>();
+        for (String project: kluges) {
+            if (px.getBndCatalog().hasProject(project)) {
+                String encodedKluge = encodeKluge(project);
+                var oldFocusList = getRawFocusList();
+                if (oldFocusList.contains(encodedKluge)) {
+                    px.info("Kluge already added: " + project);
+                } else {
+                    // compute the new list
+                    var newFocusList = new ArrayList<>(oldFocusList);
+                    newFocusList.add(encodedKluge);
+                    // write this out to file
+                    writeFocusList(newFocusList);
+                    px.info("Added kluge: " + project);
+                }
+                if (installImmediately) {
+                    var installed = px.getProjectsInEclipse();
+                    List<Path> deps = px.getBndCatalog().getRequiredProjectPaths(List.of(project))
+                            .filter(not(p -> installed.contains(p.getFileName().toString())))
+                            .collect(toList());
+                    if (deps.isEmpty()) {
+                        px.info("Dependencies already added for " + project);
+                    } else {
+                        px.info("Installing dependencies for " + project);
+                        deps.stream()
+                                .peek(System.out::println)
+                                .forEach(px::invokeEclipse);
+                        pause();
+                    }
+                }
+            } else {
+                warn("Unable to find project: " + project);
+                failures.add(project);
+            }
+        }
+        if (!failures.isEmpty()) throw error("Some projects could not be located:", String.join("\n", failures));
     }
 
     @CommandLine.Command(description = "List focus projects.")
@@ -181,9 +212,9 @@ class Focus {
     }
 
     static class SingleAction {
-        @CommandLine.Option(names = {"-a", "--auto"}, required = true)
+        @Option(names = {"-a", "--auto"}, required = true)
         boolean auto;
-        @CommandLine.Option(names = {"-c", "--copy"}, required = true)
+        @Option(names = {"-c", "--copy"}, required = true)
         boolean copy;
     }
 
@@ -236,7 +267,7 @@ class Focus {
 
     @CommandLine.Command(aliases = {"unkludge"}, description = "Removes the specified project from the list of kluges.")
     void unkluge(
-            @CommandLine.Parameters(description = "The name of a project to remove")
+            @Parameters(description = "The name of a project to remove")
             String project
     ) {
         var klugeProject = KLUGE + project;
@@ -255,7 +286,7 @@ class Focus {
     private void writeFocusList(List<String> newFocusList) {
         // write this out to file
         try (FileWriter fw = new FileWriter(getFocusListFile().toFile()); PrintWriter pw = new PrintWriter(fw)) {
-            newFocusList.forEach(pw::println);
+            newFocusList.stream().distinct().forEach(pw::println);
         } catch (IOException e) {
             throw error("Failed to open focus file for writing");
         }
@@ -263,9 +294,9 @@ class Focus {
 
     private void printFocusList(List<String> rawFocusList) {
         System.out.printf("%nKluge list:%n");
-        getKlugeProjects(rawFocusList).map("\t"::concat).forEach(System.out::println);
+        getKlugeProjects(rawFocusList).map("\t"::concat).distinct().forEach(System.out::println);
         System.out.printf("%nFocus list:%n");
-        getFocusPatterns(rawFocusList).map("\t"::concat).forEach(System.out::println);
+        getFocusPatterns(rawFocusList).map("\t"::concat).distinct().forEach(System.out::println);
         if (rawFocusList.stream().anyMatch(s -> s.startsWith("!")))
             System.out.println("N.B. When using exclusion (a pattern preceded by an exclamation mark), order is important. Inclusions and exclusions happens in list order.");
     }
