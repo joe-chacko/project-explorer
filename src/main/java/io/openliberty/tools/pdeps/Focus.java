@@ -11,10 +11,10 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static io.openliberty.tools.pdeps.ProjectExplorer.error;
@@ -93,29 +93,30 @@ class Focus {
             @CommandLine.ArgGroup(exclusive = true, multiplicity = "0..1")
             MultiAction action
     ) {
+        action = Optional.ofNullable(action).orElseGet(MultiAction::new);
+        boolean singleBatch = null == action.auto || !action.auto.iterate;
+
         var leaves = getLeafDependencies().collect(toCollection(LinkedList::new));
+
         for (;;) {
-            // set up the action for each leaf
-            Consumer<String> print = System.out::println;
-            Consumer<String> exec = null == action ? print : print.andThen(action.copy ? ProjectExplorer::copyToClipboard : px::invokeEclipse);
-
-            var first = leaves.pollFirst();
-            exec.accept(first);
-
-            leaves.forEach(leaf -> {
-                // perform the wait, if specified
-                if (action != null) action.waitOrPause();
-                // process the next project
-                exec.accept(leaf);
-            });
-            printProjectsRemaining();
-            if (null == action || null == action.auto || !action.auto.iterate) return;
-            leaves = getLeafDependencies(true).collect(toCollection(LinkedList::new));
-            if (leaves.isEmpty()) {
-                System.out.println("Finished! =D");
-                return;
+            long depCount = getRemainingDependencies().count();
+            int batchSize = leaves.size();
+            px.info("Batch size: %2d (%2d%% of %d remaining projects)", batchSize, 100 * batchSize / depCount, depCount);
+            for (int i = 0; i < batchSize; i++) {
+                String path = leaves.get(i);
+                if (i > 0) action.waitOrPause(); // only pause BETWEEN items
+                System.out.println(path);
+                if (action.copy) ProjectExplorer.copyToClipboard(path);
+                else px.invokeEclipse(path);
+                px.info("%d / %d (%d%%)", i + 1, batchSize, 100 * (i + 1) / batchSize);
+            }
+            if (singleBatch) break;
+            if (batchSize == depCount) {
+                px.info("Finished! =D");
+                break;
             }
             pause();
+            leaves = getLeafDependencies(true).collect(toCollection(LinkedList::new));
         }
     }
 
@@ -131,8 +132,7 @@ class Focus {
             @CommandLine.Option(names = {"-c", "--count"}, description = "Show a count of the remaining dependencies")
             boolean count
     ) {
-        var paths = getAllRequiredProjects()
-                .filter(p -> !px.getProjectsInEclipse().contains(p.getFileName().toString()));
+        var paths = getRemainingDependencies();
         if (count) System.out.println(paths.count());
         else paths
                 .map(Path::toAbsolutePath)
@@ -202,11 +202,10 @@ class Focus {
     ) {
         var next = getLeafDependencies().findFirst().get();
         System.out.println(next);
-        if (null != action) {
-            if (action.copy) ProjectExplorer.copyToClipboard(next);
-            if (action.auto) px.invokeEclipse(next);
-        }
-        printProjectsRemaining();
+        if (null == action) return;
+        if (action.copy) ProjectExplorer.copyToClipboard(next);
+        if (action.auto) px.invokeEclipse(next);
+        printProjectsRemaining(); // the count might miss the last update to Eclipse - could sleep to wait for it?
     }
 
     private Stream<String> getLeafDependencies() { return getLeafDependencies(false); }
@@ -216,7 +215,7 @@ class Focus {
         var leaves = px.getBndCatalog().getLeafProjects(projects, px.getProjectsInEclipse()).collect(toList());
         OUTER_HERE:
         if (leaves.isEmpty()) { // no kluge deps, so move onto remaining deps
-            projects = getAllRequiredProjects().map(Path::getFileName).map(Path::toString).collect(toSet());
+            projects = getAllDependencies().map(Path::getFileName).map(Path::toString).collect(toSet());
             leaves = px.getBndCatalog().getLeafProjects(projects, px.getProjectsInEclipse()).collect(toList());
             if (allowEmpty) break OUTER_HERE;
             if (leaves.isEmpty()) throw error("Nothing to import!");
@@ -227,7 +226,7 @@ class Focus {
 
     @CommandLine.Command(description = "Identify orphaned projects in eclipse not needed for editing the current focus projects")
     void orphans() {
-        var required = getAllRequiredProjects().map(Path::getFileName).map(Path::toString).collect(toSet());
+        var required = getAllDependencies().map(Path::getFileName).map(Path::toString).collect(toSet());
         var known = new TreeSet<>(px.getProjectsInEclipse());
         known.removeAll(required);
         System.out.println("The following projects are no longer required for the current focus:");
@@ -296,7 +295,11 @@ class Focus {
         return concat(kluges, focuses);
     }
 
-    private Stream<Path> getAllRequiredProjects() {
+    private Stream<Path> getRemainingDependencies() {
+        return getAllDependencies().filter(p -> !px.getProjectsInEclipse().contains(p.getFileName().toString()));
+    }
+
+    private Stream<Path> getAllDependencies() {
         var focusProjects = px.getMatchingProjects(getFocusPatterns().collect(toList()));
         var users = px.getBndCatalog().getDependentProjectPaths(focusProjects).map(Path::getFileName).map(Path::toString);
         var all = concat(focusProjects.stream(), users).collect(toSet());
@@ -350,15 +353,12 @@ class Focus {
     }
 
     private static void pause() {
-        System.out.println("Press return to continue");
+        System.out.print("Press return to continue");
         new Scanner(System.in).nextLine();
     }
 
     private void printProjectsRemaining() {
-        px.notifyEclipseUpdated();
-        int count = (int) getAllRequiredProjects()
-                .filter(p -> !px.getProjectsInEclipse().contains(p.getFileName().toString()))
-                .count();
-        System.out.println("Total projects remaining to import = " + count);
+        if (px.quiet) return;
+        System.out.printf("%d projects left to import.\n", getRemainingDependencies().count());
     }
 }
