@@ -216,7 +216,7 @@ public class ProjectExplorer {
         Stream.of(extraArgs).forEach(cmd::add);
         try {
             if (dryRun) cmd.stream().collect(joining(" ", "'" , "'"));
-            new ProcessBuilder(cmd).inheritIO().start().waitFor();
+            else new ProcessBuilder(cmd).inheritIO().start().waitFor();
         } catch (IOException e) {
             error("Error invoking command " + cmd.stream().collect(joining("' '", "'", "'")) + e.getMessage());
         } catch (InterruptedException e) {
