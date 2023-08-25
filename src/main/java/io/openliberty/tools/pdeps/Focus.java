@@ -99,6 +99,7 @@ class Focus {
     ) {
         action = Optional.ofNullable(action).orElseGet(MultiAction::new);
         boolean singleBatch = null == action.auto || !action.auto.iterate;
+        px.verbose("Processing " + (singleBatch ? " next batch only" : "all batches"));
 
         var leaves = getLeafDependencies().collect(toCollection(LinkedList::new));
 
@@ -111,8 +112,10 @@ class Focus {
                 if (i > 0) action.waitOrPause(); // only pause BETWEEN items
                 System.out.println(path);
                 if (action.copy) ProjectExplorer.copyToClipboard(path);
-                else px.invokeEclipse(path);
-                px.info("%d / %d (%d%%)", i + 1, batchSize, 100 * (i + 1) / batchSize);
+                if (null != action.auto) {
+                    px.invokeEclipse(path);
+                    px.info("%d / %d (%d%%)", i + 1, batchSize, 100 * (i + 1) / batchSize);
+                }
             }
             if (singleBatch) break;
             if (batchSize == depCount) {

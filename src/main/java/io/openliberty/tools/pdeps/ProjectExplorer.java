@@ -67,6 +67,9 @@ public class ProjectExplorer {
     @Option(names = {"-q", "--quiet"}, description = "Suppress extraneous information. Might be useful when using in a script.")
     boolean quiet;
 
+    @Option(names = {"-v", "--verbose"}, description = "Show more information about processing.")
+    boolean verbose;
+
     private BndCatalog catalog;
 
     static void copyToClipboard(String text) { getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null); }
@@ -259,6 +262,9 @@ public class ProjectExplorer {
 
     void info(String msg, Object...inserts) { if (!quiet) System.out.println(String.format(msg, inserts)); }
     void info(Supplier<String> msg) { if (!quiet) System.out.println(msg.get()); }
+
+    void verbose(String msg, Object...inserts) { if (!quiet && verbose) System.out.println(String.format(msg, inserts)); }
+    void verbose(Supplier<String> msg) { if (!quiet && verbose) System.out.println(msg.get()); }
 
     enum EclipseOrdering implements Comparator<Path> {
         COMPARATOR;
