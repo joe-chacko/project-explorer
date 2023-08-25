@@ -70,6 +70,9 @@ public class ProjectExplorer {
     @Option(names = {"-v", "--verbose"}, description = "Show more information about processing.")
     boolean verbose;
 
+    @Option(names = {"-n", "--dry-run"}, description = "Do not run commands - just print them.")
+    boolean dryRun;
+
     private BndCatalog catalog;
 
     static void copyToClipboard(String text) { getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null); }
@@ -201,16 +204,18 @@ public class ProjectExplorer {
     private Path getEclipseWorkspace() { return verifyDir("eclipse workspace", eclipseWorkspace); }
     void invokeEclipse(Path path) { invokeEclipse(path.toString()); }
     void invokeEclipse(String path) {
+        verbose("Invoking eclipse to import %s", path);
         // invoke eclipse
         run(requireEclipseCommand(), path);
         // optionally click finish
-        Optional.ofNullable(getFinishCommand()).filter(not(List::isEmpty)).ifPresent(ProjectExplorer::run);
+        Optional.ofNullable(getFinishCommand()).filter(not(List::isEmpty)).ifPresent(this::run);
     }
 
     private static boolean isMacOS() { return "Mac OS X".equals(System.getProperty("os.name")); }
-    private static void run(List<String> cmd, String...extraArgs) {
+    private void run(List<String> cmd, String...extraArgs) {
         Stream.of(extraArgs).forEach(cmd::add);
         try {
+            if (dryRun) cmd.stream().collect(joining(" ", "'" , "'"));
             new ProcessBuilder(cmd).inheritIO().start().waitFor();
         } catch (IOException e) {
             error("Error invoking command " + cmd.stream().collect(joining("' '", "'", "'")) + e.getMessage());
