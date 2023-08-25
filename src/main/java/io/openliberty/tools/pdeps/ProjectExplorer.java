@@ -212,7 +212,8 @@ public class ProjectExplorer {
     }
 
     private static boolean isMacOS() { return "Mac OS X".equals(System.getProperty("os.name")); }
-    private void run(List<String> cmd, String...extraArgs) {
+    private void run(List<String> initialCmd, String...extraArgs) {
+        var cmd = new ArrayList<>(initialCmd);
         Stream.of(extraArgs).forEach(cmd::add);
         try {
             if (dryRun) System.out.println(cmd.stream().collect(joining("' '", "'" , "'")));
